@@ -6,6 +6,7 @@ A Python/FastAPI and browser-based prototype for visualizing Earth-orbiting obje
 
 ## Contents
 
+- [Live demo](#live-demo)
 - [Overview](#overview)
 - [Current capabilities](#current-capabilities)
 - [Technology stack](#technology-stack)
@@ -22,6 +23,29 @@ A Python/FastAPI and browser-based prototype for visualizing Earth-orbiting obje
 - [Security notes](#security-notes)
 - [Possible next steps](#possible-next-steps)
 - [References](#references)
+
+## Live demo
+
+The prototype is deployed on Vercel:
+
+**<https://aces-hackathon-theta.vercel.app>**
+
+| Page | Link |
+|---|---|
+| Sign-in / landing page | <https://aces-hackathon-theta.vercel.app/> |
+| Mission dashboard | <https://aces-hackathon-theta.vercel.app/dashboard.html> |
+| Conjunction API | <https://aces-hackathon-theta.vercel.app/api/conjunctions> |
+
+**Demo sign-in credentials**
+
+| Field | Value |
+|---|---|
+| Email | `operator@ssa.local` |
+| Password | `orbit2026` |
+
+These are shared demonstration credentials for judges and reviewers only. They protect nothing sensitive, and the login endpoint does not secure the other API routes (see [Security notes](#security-notes)). To use your own values on a deployment, set `SSA_OPERATOR_EMAIL` and `SSA_OPERATOR_PASSWORD` in Vercel under **Settings → Environment Variables** and redeploy.
+
+**What the hosted demo shows:** by default the deployment uses a small bundled demonstration catalogue (3 satellites and 4 debris fragments) so the dashboard is stable and uncluttered. Set `SSA_LIVE_DATA=1` to switch to live CelesTrak and NOAA data (see [Configuration](#configuration)).
 
 ## Overview
 
@@ -264,8 +288,20 @@ Optional environment variables for the demonstration login endpoint:
 |---|---|---|
 | `SSA_OPERATOR_EMAIL` | Operator email checked by `/api/login` | `operator@ssa.local` |
 | `SSA_OPERATOR_PASSWORD` | Operator password checked by `/api/login` | `orbit2026` |
+| `SSA_LIVE_DATA` | Set to `1` to fetch live CelesTrak and NOAA data; otherwise the bundled demo catalogue is used | `0` (off) |
+| `SSA_MAX_DEBRIS` | Maximum number of live debris objects returned when live data is on | `30` |
+| `SSA_MAX_PAIRS` | Maximum number of conjunction pair records returned | `150` |
 
 Set your own values before running the application if you use the login endpoint, and do not commit secrets to source control. These defaults are only for local demonstration and should be changed/removed before deployment. Because the endpoint does not establish an authenticated session, changing the credentials alone does not secure the rest of the API.
+
+## Deploying to Vercel
+
+1. Push the project to GitHub.
+2. In Vercel choose **Add New → Project**, import the repository, and keep the auto-detected **FastAPI** preset (leave build and output settings empty).
+3. Add the environment variables from [Configuration](#configuration) if you want non-default values.
+4. Click **Deploy**. Every later push to `main` redeploys automatically.
+
+On Vercel the frontend is served from the `public/` folder, and in-memory state (maneuvers, caches) can reset between requests because the backend runs as serverless functions.
 
 ## Database and persistence
 
