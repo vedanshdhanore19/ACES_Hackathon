@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sgp4.api import Satrec, jday
@@ -8,7 +8,7 @@ import json
 import math
 import os
 
-app = FastAPI(title="Advanced SSA Kinematic Radar & 4D Orbit Predictor")
+app = FastAPI(title="Advanced SSA Kinematic Radar & J2 Perturbation Engine")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,8 +20,25 @@ app.add_middleware(
 
 CELESTRAK_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=json"
 NOAA_SOLAR_URL = "https://services.swpc.noaa.gov/json/f107_cm_radio_flux.json"
+NOAA_XRAY_URL = "https://services.swpc.noaa.gov/json/goes/primary/xrays-6-hour.json"
 LOCAL_SATELLITE_DATA = "data/celestrak_satellites.json"
 LOCAL_SOLAR_DATA = "data/noaa_solar_flux.json"
+
+# In-memory maneuver offset tracker
+MANEUVERED_SATELLITES = {}
+
+J2_EARTH = 1.08263e-3
+R_EARTH_KM = 6378.137
+MU_EARTH = 398600.4418
+
+def compute_j2_nodal_precession(semimajor_axis_km: float, inclination_deg: float) -> float:
+    if semimajor_axis_km <= R_EARTH_KM:
+        return 0.0
+    inc_rad = math.radians(inclination_deg)
+    p = semimajor_axis_km
+    n = math.sqrt(MU_EARTH / (p**3))
+    domega_rad_sec = -1.5 * J2_EARTH * ((R_EARTH_KM / p)**2) * n * math.cos(inc_rad)
+    return round(math.degrees(domega_rad_sec) * 86400.0, 3)
 
 def estimate_object_size(norad_id: int, obj_name: str) -> dict:
     name_upper = obj_name.upper()
@@ -33,20 +50,7 @@ def estimate_object_size(norad_id: int, obj_name: str) -> dict:
         return {"radius_m": 0.85, "type": "Space Debris Fragment"}
     return {"radius_m": 2.1, "type": "Active Satellite Payload"}
 
-def compute_orbit_ring_points(sat_rec, base_jd, base_fr, num_points=72):
-    """Generates 3D spatial points for one complete orbital revolution."""
-    points = []
-    for step in range(num_points):
-        minutes_offset = (step / num_points) * 92.0
-        jd = base_jd
-        fr = base_fr + (minutes_offset / 1440.0)
-        e, pos, _ = sat_rec.sgp4(jd, fr)
-        if e == 0:
-            points.append([round(p, 2) for p in pos])
-    return points
-
-def generate_synthetic_orbit_ring(pos_eci, radius_m):
-    """Generates analytical circular orbit rings for all satellites and payloads."""
+def generate_synthetic_orbit_ring(pos_eci):
     r_mag = math.sqrt(sum(p**2 for p in pos_eci))
     points = []
     for step in range(60):
@@ -57,41 +61,50 @@ def generate_synthetic_orbit_ring(pos_eci, radius_m):
         points.append([round(x, 2), round(y, 2), round(z, 2)])
     return points
 
-def load_solar_flux(solar_flux_override: float = None) -> float:
+def load_solar_weather(solar_flux_override: float = None) -> tuple:
+    f107 = 150.0
+    flare_class = "C-CLASS NORMAL"
     if solar_flux_override is not None:
-        return float(solar_flux_override)
+        f107 = float(solar_flux_override)
+        if f107 > 280: flare_class = "X-CLASS SEVERE STORM"
+        elif f107 > 200: flare_class = "M-CLASS MODERATE FLARE"
+        elif f107 > 120: flare_class = "C-CLASS NORMAL"
+        else: flare_class = "A/B-CLASS QUIET SUN"
+        return f107, flare_class
     try:
         sw_res = requests.get(NOAA_SOLAR_URL, timeout=3).json()
-        if sw_res and 'flux' in sw_res[0]:
-            return float(sw_res[0]['flux'])
+        if sw_res and 'flux' in sw_res[0]: f107 = float(sw_res[0]['flux'])
     except Exception:
         pass
-    if os.path.exists(LOCAL_SOLAR_DATA):
-        try:
-            with open(LOCAL_SOLAR_DATA, 'r') as f:
-                return float(json.load(f)[0]['flux'])
-        except Exception:
-            pass
-    return 150.0
+    return f107, flare_class
 
 def load_satellite_catalog() -> list:
     try:
         sat_res = requests.get(CELESTRAK_URL, timeout=4).json()
-        if sat_res:
-            return sat_res[:80]
+        if sat_res: return sat_res[:80]
     except Exception:
         pass
     if os.path.exists(LOCAL_SATELLITE_DATA):
         try:
-            with open(LOCAL_SATELLITE_DATA, 'r') as f:
-                return json.load(f)
-        except Exception:
-            pass
+            with open(LOCAL_SATELLITE_DATA, 'r') as f: return json.load(f)
+        except Exception: pass
     return []
+
+@app.post("/api/maneuver")
+def apply_maneuver(data: dict = Body(...)):
+    sat_name = data.get("sat_name")
+    strategy = data.get("strategy", "A")
+    offset = 2500.0 if strategy == "A" else 5000.0
+    
+    MANEUVERED_SATELLITES[sat_name] = {
+        "offset_eci": [offset, offset * 0.5, -offset * 0.3],
+        "strategy": strategy
+    }
+    return {"status": "success", "sat_name": sat_name, "offset_applied": offset}
 
 @app.get("/api/conjunctions")
 def get_conjunctions(solar_flux_override: float = None, time_offset_hours: float = 0.0):
-    f107 = load_solar_flux(solar_flux_override)
+    f107, flare_class = load_solar_weather(solar_flux_override)
     sat_data = load_satellite_catalog()
     drag_sigma_km = 0.8 + (f107 / 100.0) * 1.8
 
@@ -99,7 +112,6 @@ def get_conjunctions(solar_flux_override: float = None, time_offset_hours: float
     now = datetime.utcnow() + timedelta(hours=time_offset_hours)
     jd, fr = jday(now.year, now.month, now.day, now.hour, now.minute, now.second)
 
-    # Ingest active catalog and generate orbital rings for ALL satellites
     if sat_data:
         for idx, sat_obj in enumerate(sat_data):
             try:
@@ -109,25 +121,33 @@ def get_conjunctions(solar_flux_override: float = None, time_offset_hours: float
                     s_name = sat_obj.get('OBJECT_NAME', f'SAT-{idx}')
                     norad_id = sat_obj.get('NORAD_CAT_ID', 10000 + idx)
                     size_info = estimate_object_size(norad_id, s_name)
+                    r_mag = math.sqrt(sum(p**2 for p in pos))
+                    inc_deg = math.degrees(sat_rec.inclo)
+                    j2_precession = compute_j2_nodal_precession(r_mag, inc_deg)
                     
-                    # Compute orbital ring points
-                    ring_points = compute_orbit_ring_points(sat_rec, jd, fr)
-                    if not ring_points:
-                        ring_points = generate_synthetic_orbit_ring(pos, size_info['radius_m'])
-                    
+                    pos_list = [round(p, 3) for p in pos]
+                    is_maneuvered = False
+                    if s_name in MANEUVERED_SATELLITES:
+                        m = MANEUVERED_SATELLITES[s_name]["offset_eci"]
+                        pos_list[0] += m[0]
+                        pos_list[1] += m[1]
+                        pos_list[2] += m[2]
+                        is_maneuvered = True
+
                     satellites_render.append({
                         "id": norad_id,
                         "name": s_name,
                         "type": size_info['type'],
                         "radius_m": size_info['radius_m'],
-                        "pos_eci": [round(p, 3) for p in pos],
+                        "j2_nodal_precession_deg_day": j2_precession,
+                        "maneuvered": is_maneuvered,
+                        "pos_eci": pos_list,
                         "vel_eci": [round(v, 4) for v in vel],
-                        "orbit_ring": ring_points
+                        "orbit_ring": generate_synthetic_orbit_ring(pos_list)
                     })
             except Exception:
                 continue
 
-    # Fallback satellite catalog with guaranteed orbital rings
     if not satellites_render:
         fallback_sats = [
             {"id": 49120, "name": "STARLINK-3104", "type": "Active Satellite Payload", "radius_m": 3.2, "pos_eci": [4210.5, 3100.2, 5100.8], "vel_eci": [-1.2, 7.1, 2.3]},
@@ -136,44 +156,39 @@ def get_conjunctions(solar_flux_override: float = None, time_offset_hours: float
             {"id": 47312, "name": "ONEWEB-0182", "type": "Active Satellite Payload", "radius_m": 2.8, "pos_eci": [-2095.1, 5508.3, 3805.2], "vel_eci": [6.42, 1.18, -3.75]}
         ]
         for s in fallback_sats:
-            s["orbit_ring"] = generate_synthetic_orbit_ring(s["pos_eci"], s["radius_m"])
+            s["j2_nodal_precession_deg_day"] = -5.12
+            s["maneuvered"] = s["name"] in MANEUVERED_SATELLITES
+            if s["maneuvered"]:
+                m = MANEUVERED_SATELLITES[s["name"]]["offset_eci"]
+                s["pos_eci"][0] += m[0]
+                s["pos_eci"][1] += m[1]
+                s["pos_eci"][2] += m[2]
+            s["orbit_ring"] = generate_synthetic_orbit_ring(s["pos_eci"])
             satellites_render.append(s)
 
-    # Position Debris Objects FARTHER OUT in deep space orbits
-    far_debris_elements = [
-        {"id": 99001, "name": "COSMOS 2251 DEBRIS (FAR)", "type": "Space Debris Fragment", "radius_m": 0.85, "pos_eci": [14200.5, -16500.2, 11800.8], "vel_eci": [-2.12, 3.85, 1.80], "orbit_ring": generate_synthetic_orbit_ring([14200.5, -16500.2, 11800.8], 0.85)},
-        {"id": 99002, "name": "FENGYUN 1C DEBRIS (DEEP)", "type": "Space Debris Fragment", "radius_m": 0.90, "pos_eci": [-18500.2, 12800.1, -14200.4], "vel_eci": [3.20, -1.85, -2.80], "orbit_ring": generate_synthetic_orbit_ring([-18500.2, 12800.1, -14200.4], 0.90)},
-        {"id": 99003, "name": "TITAN 3C R/B DEBRIS (OUTER)", "type": "Spent Rocket Body", "radius_m": 3.40, "pos_eci": [8200.1, 19500.0, -15100.5], "vel_eci": [-3.80, -1.20, 2.85], "orbit_ring": generate_synthetic_orbit_ring([8200.1, 19500.0, -15100.5], 3.40)}
+    far_debris = [
+        {"id": 99001, "name": "COSMOS 2251 DEBRIS (FAR)", "type": "Space Debris Fragment", "radius_m": 0.85, "j2_nodal_precession_deg_day": -3.21, "maneuvered": False, "pos_eci": [14200.5, -16500.2, 11800.8], "vel_eci": [-2.12, 3.85, 1.80], "orbit_ring": generate_synthetic_orbit_ring([14200.5, -16500.2, 11800.8])},
+        {"id": 99002, "name": "FENGYUN 1C DEBRIS (DEEP)", "type": "Space Debris Fragment", "radius_m": 0.90, "j2_nodal_precession_deg_day": -2.85, "maneuvered": False, "pos_eci": [-18500.2, 12800.1, -14200.4], "vel_eci": [3.20, -1.85, -2.80], "orbit_ring": generate_synthetic_orbit_ring([-18500.2, 12800.1, -14200.4])}
     ]
-    satellites_render.extend(far_debris_elements)
+    satellites_render.extend(far_debris)
 
-    # Pairwise Conjunction Screening: Includes BOTH Satellite-to-Satellite and Satellite-to-Debris pairs
     conjunction_pairs = []
     num_objs = len(satellites_render)
     for i in range(num_objs):
         for j in range(i + 1, num_objs):
             s1, s2 = satellites_render[i], satellites_render[j]
-            
-            # 1. Satellite <-> Satellite Collision Screening
             is_sat1 = "Debris" not in s1["type"]
             is_sat2 = "Debris" not in s2["type"]
-            
-            if is_sat1 and is_sat2:
+            if is_sat1 or is_sat2:
                 conjunction_pairs.append({
                     "sat1_name": s1["name"],
                     "sat2_name": s2["name"],
-                    "event_type": "SATELLITE ↔ SATELLITE CONJUNCTION"
-                })
-            # 2. Satellite <-> Debris Collision Screening
-            elif (is_sat1 and not is_sat2) or (not is_sat1 and is_sat2):
-                conjunction_pairs.append({
-                    "sat1_name": s1["name"],
-                    "sat2_name": s2["name"],
-                    "event_type": "SATELLITE ↔ DEBRIS CONJUNCTION"
+                    "event_type": "SATELLITE ↔ SATELLITE CONJUNCTION" if (is_sat1 and is_sat2) else "SATELLITE ↔ DEBRIS CONJUNCTION"
                 })
 
     return {
         "f107_index": round(f107, 1),
+        "solar_flare_class": flare_class,
         "time_offset_hours": round(time_offset_hours, 1),
         "drag_covariance_sigma_km": round(drag_sigma_km, 2),
         "active_satellites_count": len(satellites_render),
