@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Body
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sgp4.api import Satrec, jday
@@ -24,7 +24,6 @@ NOAA_XRAY_URL = "https://services.swpc.noaa.gov/json/goes/primary/xrays-6-hour.j
 LOCAL_SATELLITE_DATA = "data/celestrak_satellites.json"
 LOCAL_SOLAR_DATA = "data/noaa_solar_flux.json"
 
-# In-memory maneuver offset tracker
 MANEUVERED_SATELLITES = {}
 
 J2_EARTH = 1.08263e-3
@@ -91,7 +90,8 @@ def load_satellite_catalog() -> list:
     return []
 
 @app.post("/api/maneuver")
-def apply_maneuver(data: dict = Body(...)):
+async def apply_maneuver(request: Request):
+    data = await request.json()
     sat_name = data.get("sat_name")
     strategy = data.get("strategy", "A")
     offset = 2500.0 if strategy == "A" else 5000.0

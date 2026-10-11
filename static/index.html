@@ -32,7 +32,8 @@
     
     .btn-maneuver {
       background: rgba(0, 255, 204, 0.25); border: 1px solid #00ffcc; color: #00ffcc;
-      padding: 6px 12px; margin-top: 6px; cursor: pointer; font-size: 10px; border-radius: 3px; font-weight: bold;
+      padding: 8px 14px; margin-top: 6px; cursor: pointer; font-size: 11px; border-radius: 3px; font-weight: bold;
+      pointer-events: auto !important; position: relative; z-index: 2000;
     }
     .btn-maneuver:hover { background: #00ffcc; color: #000; }
 
@@ -55,8 +56,8 @@
     #modal-planner {
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
       background: rgba(5, 15, 35, 0.98); border: 2px solid #ff3366;
-      box-shadow: 0 0 40px rgba(255, 51, 102, 0.6);
-      padding: 20px; border-radius: 8px; width: 450px; z-index: 1000; display: none;
+      box-shadow: 0 0 50px rgba(255, 51, 102, 0.8);
+      padding: 20px; border-radius: 8px; width: 450px; z-index: 9999; display: none;
     }
     .strategy-card {
       background: rgba(255,255,255,0.05); border: 1px solid #00ffcc;
@@ -107,7 +108,7 @@
   <div id="modal-planner">
     <span class="close-btn" id="btn-close-planner">[X] CLOSE</span>
     <h2 style="border-color:#ff3366; color:#ff3366;">AVOIDANCE MANEUVER SIMULATOR</h2>
-    <p style="font-size:11px; margin-top:6px; color:#ffffff;">Select optimal avoidance strategy for <b id="plan-sat" style="color:#00ffcc">--</b>:</p>
+    <p style="font-size:11px; margin-top:6px; color:#ffffff;">Select optimal avoidance strategy for <b id="plan-sat" style="color:#00ffcc">STARLINK-3104</b>:</p>
 
     <div class="strategy-card">
       <b style="color:#00ffcc">STRATEGY A: OPTIMAL FUEL BURN (0.18 m/s)</b><br>
@@ -129,7 +130,7 @@
   <div id="canvas-container"></div>
 
   <script>
-    let activeTargetSatName = "";
+    let activeTargetSatName = "STARLINK-3104";
 
     function speakTacticalAlert(text) {
       if ('speechSynthesis' in window) {
@@ -299,9 +300,9 @@
         list.appendChild(card);
       });
 
-      // Bind click events on static HUD buttons
       document.querySelectorAll('.open-planner-btn').forEach(btn => {
-        btn.onclick = function(e) {
+        const handler = function(e) {
+          e.preventDefault();
           e.stopPropagation();
           const satName = this.getAttribute('data-sat');
           activeTargetSatName = satName;
@@ -309,6 +310,7 @@
           document.getElementById('modal-planner').style.display = 'block';
           speakTacticalAlert(`Warning: Conjunction detected for ${satName}. Avoidance maneuver required.`);
         };
+        btn.onclick = handler;
       });
     }
 
@@ -337,7 +339,6 @@
       renderer.render(scene, camera);
     }
 
-    // Static Control Handlers
     document.getElementById('btn-debrief').onclick = () => {
       speakTacticalAlert('Radar system operational. Tracking satellite constellations and orbital debris field in real time.');
     };
@@ -352,25 +353,41 @@
     };
 
     async function sendManeuverToBackend(strategy) {
-      const satName = activeTargetSatName || document.getElementById('plan-sat').innerText;
+      const satName = activeTargetSatName || document.getElementById('plan-sat').innerText || "STARLINK-3104";
+      
+      // Client-side local application for immediate visual feedback
+      const targetObj = trackedObjects.find(o => o.name === satName);
+      if (targetObj) {
+        const offsetDist = strategy === 'A' ? 2500.0 : 5000.0;
+        targetObj.pos[0] += offsetDist;
+        targetObj.pos[1] += offsetDist * 0.5;
+        targetObj.maneuvered = true;
+      }
+
+      document.getElementById('modal-planner').style.display = 'none';
+      speakTacticalAlert(`Strategy ${strategy} burn sequence committed for ${satName}. Threat mitigated.`);
+      
       try {
         await fetch('/api/maneuver', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sat_name: satName, strategy: strategy })
         });
-        document.getElementById('modal-planner').style.display = 'none';
-        speakTacticalAlert(`Strategy ${strategy} burn sequence committed for ${satName}. Threat mitigated.`);
         updateSimulation();
       } catch (err) {
-        console.error("Maneuver post error:", err);
+        console.error("Maneuver API error:", err);
       }
     }
 
-    document.getElementById('btn-exec-a').onclick = () => sendManeuverToBackend('A');
-    document.getElementById('btn-exec-b').onclick = () => sendManeuverToBackend('B');
+    const btnA = document.getElementById('btn-exec-a');
+    const btnB = document.getElementById('btn-exec-b');
 
-    // Raycast Inspector
+    btnA.onclick = (e) => { e.preventDefault(); e.stopPropagation(); sendManeuverToBackend('A'); };
+    btnB.onclick = (e) => { e.preventDefault(); e.stopPropagation(); sendManeuverToBackend('B'); };
+
+    btnA.addEventListener('mousedown', (e) => e.stopPropagation());
+    btnB.addEventListener('mousedown', (e) => e.stopPropagation());
+
     window.addEventListener('click', (event) => {
       if (event.target.closest('#hud') || event.target.closest('#inspector') || event.target.closest('#modal-planner') || event.target.closest('#timeline-hud')) {
         return;
