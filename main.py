@@ -33,6 +33,8 @@ CELESTRAK_DEBRIS_URLS = [
 ]
 DEBRIS_CACHE = {"fetched_at": None, "objects": []}
 DEBRIS_CACHE_SECONDS = 900
+MAX_DEBRIS_OBJECTS = int(os.environ.get("SSA_MAX_DEBRIS", "30"))
+MAX_PAIR_RECORDS = int(os.environ.get("SSA_MAX_PAIRS", "150"))
 
 MANEUVERED_SATELLITES = {}
 
@@ -176,9 +178,11 @@ def get_conjunctions(solar_flux_override: float = None, time_offset_hours: float
     f107, flare_class = load_solar_weather(solar_flux_override)
     sat_data = load_satellite_catalog()
     known_ids = {str(row.get("NORAD_CAT_ID")) for row in sat_data}
-    for debris_row in load_debris_catalog():
-        if str(debris_row.get("NORAD_CAT_ID")) not in known_ids:
-            sat_data.append(debris_row)
+    debris_rows = [d for d in load_debris_catalog() if str(d.get("NORAD_CAT_ID")) not in known_ids]
+    if len(debris_rows) > MAX_DEBRIS_OBJECTS > 0:
+        step = len(debris_rows) / MAX_DEBRIS_OBJECTS
+        debris_rows = [debris_rows[int(i * step)] for i in range(MAX_DEBRIS_OBJECTS)]
+    sat_data.extend(debris_rows)
     drag_sigma_km = 0.8 + (f107 / 100.0) * 1.8
 
     satellites_render = []
@@ -256,6 +260,11 @@ def get_conjunctions(solar_flux_override: float = None, time_offset_hours: float
                     "sat2_name": s2["name"],
                     "event_type": "SATELLITE ↔ SATELLITE CONJUNCTION" if (is_sat1 and is_sat2) else "SATELLITE ↔ DEBRIS CONJUNCTION"
                 })
+
+    if len(conjunction_pairs) > MAX_PAIR_RECORDS:
+        pos_by_name = {o["name"]: o["pos_eci"] for o in satellites_render}
+        conjunction_pairs.sort(key=lambda p: math.dist(pos_by_name[p["sat1_name"]], pos_by_name[p["sat2_name"]]))
+        conjunction_pairs = conjunction_pairs[:MAX_PAIR_RECORDS]
 
     return {
         "f107_index": round(f107, 1),
