@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Orbital Conjunction & Space Traffic Risk Engine</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #02050e; color: #00ffcc; font-family: 'Courier New', monospace; overflow: hidden; }
+    #canvas-container { width: 100vw; height: 100vh; }
+    
+    /* Left Main HUD */
+    #hud {
+      position: absolute; top: 20px; left: 20px;
+      background: rgba(3, 10, 24, 0.94); border: 1px solid #00ffcc;
+      box-shadow: 0 0 20px rgba(0, 255, 204, 0.25);
+      padding: 16px; border-radius: 8px; width: 430px; z-index: 10;
+    }
+    h2 { font-size: 12px; margin-bottom: 8px; color: #ffffff; border-bottom: 1px solid #00ffcc; padding-bottom: 4px; letter-spacing: 1px; }
+    .control-group { margin-bottom: 12px; }
+    label { font-size: 11px; display: block; margin-bottom: 4px; color: #00ffcc; }
+    input[type=range] { width: 100%; accent-color: #ff3366; cursor: pointer; }
+    #alerts-list { max-height: 320px; overflow-y: auto; margin-top: 8px; padding-right: 4px; }
+    .alert-card {
+      background: rgba(255, 51, 102, 0.08); border-left: 3px solid #ff3366;
+      padding: 10px; margin-bottom: 12px; border-radius: 4px; font-size: 10px; line-height: 1.5;
+    }
+    .alert-card.sat-sat {
+      background: rgba(0, 255, 204, 0.08); border-left-color: #00ffcc;
+    }
+    .badge-sat { background: #00ffcc; color: #000; padding: 1px 4px; font-weight: bold; border-radius: 2px; font-size: 9px; display: inline-block; margin-bottom: 4px; }
+    .badge-deb { background: #ff9900; color: #000; padding: 1px 4px; font-weight: bold; border-radius: 2px; font-size: 9px; display: inline-block; margin-bottom: 4px; }
+    .btn-maneuver {
+      background: rgba(0, 255, 204, 0.15); border: 1px solid #00ffcc; color: #00ffcc;
+      padding: 5px 10px; margin-top: 6px; cursor: pointer; font-size: 10px; border-radius: 3px; font-weight: bold;
+    }
+    .btn-maneuver:hover { background: #00ffcc; color: #000; }
+
+    /* Bottom Timeline Scrub Bar */
+    #timeline-hud {
+      position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: rgba(3, 10, 24, 0.94); border: 1px solid #00ffcc;
+      box-shadow: 0 0 20px rgba(0, 255, 204, 0.25);
+      padding: 12px 24px; border-radius: 8px; width: 600px; z-index: 10; text-align: center;
+    }
+
+    /* Right Object Inspector */
+    #inspector {
+      position: absolute; top: 20px; right: 20px;
+      background: rgba(3, 10, 24, 0.94); border: 1px solid #ffcc00;
+      box-shadow: 0 0 20px rgba(255, 204, 0, 0.25);
+      padding: 16px; border-radius: 8px; width: 340px; z-index: 10; display: none;
+    }
+    .close-btn { float: right; cursor: pointer; color: #ff3366; font-weight: bold; }
+    .data-row { font-size: 11px; margin-bottom: 6px; color: #ffffff; }
+
+    /* Modal Maneuver Planner */
+    #modal-planner {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: rgba(5, 15, 35, 0.98); border: 2px solid #ff3366;
+      box-shadow: 0 0 30px rgba(255, 51, 102, 0.4);
+      padding: 20px; border-radius: 8px; width: 450px; z-index: 20; display: none;
+    }
+    .strategy-card {
+      background: rgba(255,255,255,0.05); border: 1px solid #00ffcc;
+      padding: 10px; margin-top: 10px; border-radius: 4px; font-size: 11px; line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Left Main HUD -->
+  <div id="hud">
+    <h2>REAL-TIME KINEMATIC SSA RADAR</h2>
+    
+    <div class="control-group">
+      <label>SOLAR FLARE FLUX (F10.7): <span id="fluxVal">150</span> sfu</label>
+      <input type="range" id="fluxSlider" min="70" max="350" value="150" oninput="updateSimulation()">
+      <div style="font-size:10px; color:#00ffcc; margin-top:4px;">
+        Tracked Objects: <b id="totalObjCount" style="color:#ffcc00">--</b> | Drag Sigma: <b id="dragVal" style="color:#ffcc00">--</b> km
+      </div>
+    </div>
+
+    <h2>CRITICAL CONJUNCTIONS (<span id="alertCount">0</span>)</h2>
+    <div id="alerts-list">Initializing radar feed...</div>
+  </div>
+
+  <!-- Bottom 4D Timeline Scrub Bar -->
+  <div id="timeline-hud">
+    <label style="font-size:11px; color:#ffffff;">4D ORBIT TIME-TRAVEL SCRUBBER: <b id="timeVal" style="color:#00ffcc">T+0.0 hours</b></label>
+    <input type="range" id="timeSlider" min="0" max="24" step="0.5" value="0" oninput="updateSimulation()">
+  </div>
+
+  <!-- Right Object Inspector -->
+  <div id="inspector">
+    <span class="close-btn" onclick="closeInspector()">[X] CLOSE</span>
+    <h2 style="border-color:#ffcc00; color:#ffcc00;">3D OBJECT INSPECTOR</h2>
+    <div class="data-row">Name: <b id="insp-name" style="color:#00ffcc">--</b></div>
+    <div class="data-row">Type: <b id="insp-type" style="color:#00ffcc">--</b></div>
+    <div class="data-row">Hard-Body Radius: <b id="insp-radius" style="color:#00ffcc">--</b> m</div>
+    <div class="data-row">Current Speed: <b id="insp-speed" style="color:#00ffcc">--</b> km/s</div>
+    <div class="data-row">Space ECI (X): <b id="insp-x" style="color:#00ffcc">--</b> km</div>
+    <div class="data-row">Space ECI (Y): <b id="insp-y" style="color:#00ffcc">--</b> km</div>
+    <div class="data-row">Space ECI (Z): <b id="insp-z" style="color:#00ffcc">--</b> km</div>
+  </div>
+
+  <!-- Avoidance Maneuver Planner Modal -->
+  <div id="modal-planner">
+    <span class="close-btn" onclick="closePlanner()">[X] CLOSE</span>
+    <h2 style="border-color:#ff3366; color:#ff3366;">AVOIDANCE MANEUVER SIMULATOR</h2>
+    <p style="font-size:11px; margin-top:6px; color:#ffffff;">Select optimal avoidance strategy for <b id="plan-sat" style="color:#00ffcc">--</b>:</p>
+
+    <div class="strategy-card">
+      <b style="color:#00ffcc">STRATEGY A: OPTIMAL FUEL BURN</b><br>
+      • Posigrade Thrust: <b>0.18 m/s</b> @ T-45min<br>
+      • Hydrazine Fuel Cost: <b>2.55 kg</b><br>
+      • Mitigated Risk: <b>P(c) drops to 0.00001</b><br>
+      <button class="btn-maneuver" onclick="executeManeuver('A')">EXECUTE BURN A</button>
+    </div>
+
+    <div class="strategy-card">
+      <b style="color:#ffcc00">STRATEGY B: MAXIMUM CLEARANCE BUFFER</b><br>
+      • Retrograde Thrust: <b>0.52 m/s</b> @ T-60min<br>
+      • Hydrazine Fuel Cost: <b>7.38 kg</b><br>
+      • Safety Clearance: <b>18.5 km buffer zone</b><br>
+      <button class="btn-maneuver" onclick="executeManeuver('B')">EXECUTE BURN B</button>
+    </div>
+  </div>
+
+  <div id="canvas-container"></div>
+
+  <script>
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 0, 36);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    container.appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    // Earth Globe Mesh
+    const earthGeo = new THREE.SphereGeometry(6.371, 32, 32);
+    const earthMat = new THREE.MeshBasicMaterial({ color: 0x0a192f, wireframe: true });
+    const earth = new THREE.Mesh(earthGeo, earthMat);
+    scene.add(earth);
+
+    // Atmospheric Heat Mesh
+    const atmosphereGeo = new THREE.SphereGeometry(6.85, 32, 32);
+    const atmosphereMat = new THREE.MeshBasicMaterial({
+      color: 0x00aaff,
+      transparent: true,
+      opacity: 0.18,
+      wireframe: true
+    });
+    const atmosphereMesh = new THREE.Mesh(atmosphereGeo, atmosphereMat);
+    scene.add(atmosphereMesh);
+
+    let trackedObjects = [];
+    let conjunctionPairs = [];
+    let selectedObject = null;
+
+    const objectsGroup = new THREE.Group();
+    const orbitRingsGroup = new THREE.Group();
+    const linesGroup = new THREE.Group();
+    scene.add(objectsGroup);
+    scene.add(orbitRingsGroup);
+    scene.add(linesGroup);
+
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+
+    async function updateSimulation() {
+      const fluxVal = document.getElementById('fluxSlider').value;
+      const timeVal = document.getElementById('timeSlider').value;
+
+      document.getElementById('timeVal').innerText = `T+${timeVal} hours`;
+
+      const normalizedFlux = (fluxVal - 70) / 280;
+      atmosphereMesh.scale.setScalar(1.0 + normalizedFlux * 0.12);
+      atmosphereMat.color.setHSL(0.55 - normalizedFlux * 0.55, 1.0, 0.5);
+
+      try {
+        const res = await fetch(`/api/conjunctions?solar_flux_override=${fluxVal}&time_offset_hours=${timeVal}`);
+        const data = await res.json();
+
+        document.getElementById('fluxVal').innerText = data.f107_index;
+        document.getElementById('dragVal').innerText = data.drag_covariance_sigma_km;
+        document.getElementById('totalObjCount').innerText = data.active_satellites_count;
+
+        while(objectsGroup.children.length > 0) { objectsGroup.remove(objectsGroup.children[0]); }
+        while(orbitRingsGroup.children.length > 0) { orbitRingsGroup.remove(orbitRingsGroup.children[0]); }
+        trackedObjects = [];
+
+        data.objects.forEach(obj => {
+          const isFarDebris = obj.type.includes("Debris");
+          const geo = new THREE.SphereGeometry(isFarDebris ? 0.22 : 0.15, 8, 8);
+          const mat = new THREE.MeshBasicMaterial({ color: isFarDebris ? 0xff9900 : 0x00ffcc });
+          const mesh = new THREE.Mesh(geo, mat);
+          
+          mesh.position.set(obj.pos_eci[0] * 0.001, obj.pos_eci[1] * 0.001, obj.pos_eci[2] * 0.001);
+          
+          const tracker = {
+            id: obj.id,
+            name: obj.name,
+            type: obj.type,
+            radius_m: obj.radius_m,
+            pos: [...obj.pos_eci],
+            vel: [...obj.vel_eci],
+            mesh: mesh
+          };
+          
+          mesh.userData = tracker;
+          objectsGroup.add(mesh);
+          trackedObjects.push(tracker);
+
+          // Render Circular Orbit Rings for ALL Objects
+          if (obj.orbit_ring && obj.orbit_ring.length > 0) {
+            const ringPoints = obj.orbit_ring.map(p => new THREE.Vector3(p[0] * 0.001, p[1] * 0.001, p[2] * 0.001));
+            const ringGeo = new THREE.BufferGeometry().setFromPoints(ringPoints);
+            const ringMat = new THREE.LineBasicMaterial({
+              color: isFarDebris ? 0xff9900 : 0x00ffcc,
+              transparent: true,
+              opacity: isFarDebris ? 0.15 : 0.35
+            });
+            orbitRingsGroup.add(new THREE.LineLoop(ringGeo, ringMat));
+          }
+        });
+
+        conjunctionPairs = data.conjunction_pairs;
+
+      } catch (err) {
+        console.error("Simulation error:", err);
+      }
+    }
+
+    const dt = 0.02;
+    function animate() {
+      requestAnimationFrame(animate);
+
+      // Real-time kinematic propagation
+      trackedObjects.forEach(obj => {
+        obj.pos[0] += obj.vel[0] * dt;
+        obj.pos[1] += obj.vel[1] * dt;
+        obj.pos[2] += obj.vel[2] * dt;
+
+        obj.mesh.position.set(obj.pos[0] * 0.001, obj.pos[1] * 0.001, obj.pos[2] * 0.001);
+      });
+
+      const list = document.getElementById('alerts-list');
+      list.innerHTML = '';
+      while(linesGroup.children.length > 0) { linesGroup.remove(linesGroup.children[0]); }
+
+      // 1. Calculate dynamic Euclidean distance for all pairs
+      let evaluatedPairs = [];
+      conjunctionPairs.forEach(pair => {
+        const o1 = trackedObjects.find(o => o.name === pair.sat1_name);
+        const o2 = trackedObjects.find(o => o.name === pair.sat2_name);
+
+        if (o1 && o2) {
+          const distKm = Math.sqrt(
+            Math.pow(o1.pos[0] - o2.pos[0], 2) +
+            Math.pow(o1.pos[1] - o2.pos[1], 2) +
+            Math.pow(o1.pos[2] - o2.pos[2], 2)
+          );
+
+          const relVel = Math.sqrt(
+            Math.pow(o1.vel[0] - o2.vel[0], 2) +
+            Math.pow(o1.vel[1] - o2.vel[1], 2) +
+            Math.pow(o1.vel[2] - o2.vel[2], 2)
+          );
+
+          evaluatedPairs.push({
+            o1, o2, distKm, relVel,
+            event_type: pair.event_type
+          });
+        }
+      });
+
+      // 2. Sort by distance (closest first) and take TOP 5 for clean HUD rendering
+      evaluatedPairs.sort((a, b) => a.distKm - b.distKm);
+      const topAlerts = evaluatedPairs.slice(0, 5);
+      document.getElementById('alertCount').innerText = topAlerts.length;
+
+      topAlerts.forEach(item => {
+        const tcaSec = Math.max(0.1, (item.distKm / (item.relVel + 0.001)));
+        const isSatSat = item.event_type.includes("SATELLITE ↔ SATELLITE");
+
+        const card = document.createElement('div');
+        card.className = `alert-card ${isSatSat ? 'sat-sat' : ''}`;
+
+        card.innerHTML = `
+          <span class="${isSatSat ? 'badge-sat' : 'badge-deb'}">${item.event_type}</span><br>
+          <b style="color:#ffffff">${item.o1.name}</b> ⚡ <b style="color:#ffffff">${item.o2.name}</b><br>
+          Miss Dist: <b style="color:#ffcc00">${item.distKm.toFixed(2)} km</b> | Closing Speed: <b>${item.relVel.toFixed(2)} km/s</b><br>
+          🎯 <b>PREDICTED CONTACT:</b> TCA: <b style="color:#ff0055">T+${tcaSec.toFixed(1)}s</b><br>
+          <button class="btn-maneuver" onclick="openPlanner('${item.o1.name}')">SIMULATE AVOIDANCE BURN</button>
+        `;
+        list.appendChild(card);
+
+        // 3. ONLY draw 3D red lines for close encounters (< 3500 km) to prevent visual clutter
+        if (item.distKm < 3500) {
+          const p1 = new THREE.Vector3(...item.o1.pos).multiplyScalar(0.001);
+          const p2 = new THREE.Vector3(...item.o2.pos).multiplyScalar(0.001);
+          const lineGeo = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+          const lineMat = new THREE.LineBasicMaterial({
+            color: isSatSat ? 0x00ffcc : 0xff3366,
+            linewidth: 2
+          });
+          linesGroup.add(new THREE.Line(lineGeo, lineMat));
+        }
+      });
+
+      if (selectedObject) {
+        const speed = Math.sqrt(selectedObject.vel[0]**2 + selectedObject.vel[1]**2 + selectedObject.vel[2]**2);
+        document.getElementById('insp-speed').innerText = speed.toFixed(3);
+        document.getElementById('insp-x').innerText = selectedObject.pos[0].toFixed(2);
+        document.getElementById('insp-y').innerText = selectedObject.pos[1].toFixed(2);
+        document.getElementById('insp-z').innerText = selectedObject.pos[2].toFixed(2);
+      }
+
+      earth.rotation.y += 0.0005;
+      atmosphereMesh.rotation.y += 0.0005;
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    // 3D Raycaster Object Selection
+    window.addEventListener('click', (event) => {
+      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObjects(objectsGroup.children);
+
+      if (intersects.length > 0) {
+        const objData = intersects[0].object.userData;
+        selectedObject = objData;
+
+        document.getElementById('insp-name').innerText = objData.name;
+        document.getElementById('insp-type').innerText = objData.type;
+        document.getElementById('insp-radius').innerText = objData.radius_m;
+        document.getElementById('inspector').style.display = 'block';
+      }
+    });
+
+    function closeInspector() {
+      document.getElementById('inspector').style.display = 'none';
+      selectedObject = null;
+    }
+
+    function openPlanner(satName) {
+      document.getElementById('plan-sat').innerText = satName;
+      document.getElementById('modal-planner').style.display = 'block';
+    }
+
+    function closePlanner() {
+      document.getElementById('modal-planner').style.display = 'none';
+    }
+
+    function executeManeuver(strategy) {
+      alert(`Maneuver Strategy ${strategy} committed to orbit sequence! Telemetry updated.`);
+      closePlanner();
+    }
+
+    updateSimulation();
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
