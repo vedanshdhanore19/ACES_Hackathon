@@ -7,6 +7,8 @@ import requests
 import json
 import math
 import os
+import hmac
+from fastapi.responses import JSONResponse
 
 app = FastAPI(title="Advanced SSA Kinematic Radar & J2 Perturbation Engine")
 
@@ -21,8 +23,16 @@ app.add_middleware(
 CELESTRAK_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=json"
 NOAA_SOLAR_URL = "https://services.swpc.noaa.gov/json/f107_cm_radio_flux.json"
 NOAA_XRAY_URL = "https://services.swpc.noaa.gov/json/goes/primary/xrays-6-hour.json"
-LOCAL_SATELLITE_DATA = "data/celestrak_satellites.json"
-LOCAL_SOLAR_DATA = "data/noaa_solar_flux.json"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOCAL_SATELLITE_DATA = os.path.join(BASE_DIR, "data", "celestrak_satellites.json")
+LOCAL_SOLAR_DATA = os.path.join(BASE_DIR, "data", "noaa_solar_flux.json")
+PUBLIC_DIR = os.path.join(BASE_DIR, "public")
+CELESTRAK_DEBRIS_URLS = [
+    "https://celestrak.org/NORAD/elements/gp.php?GROUP=cosmos-2251-debris&FORMAT=TLE",
+    "https://celestrak.org/NORAD/elements/gp.php?GROUP=fengyun-1c-debris&FORMAT=TLE",
+]
+DEBRIS_CACHE = {"fetched_at": None, "objects": []}
+DEBRIS_CACHE_SECONDS = 900
 
 MANEUVERED_SATELLITES = {}
 
@@ -77,6 +87,46 @@ def load_solar_weather(solar_flux_override: float = None) -> tuple:
         pass
     return f107, flare_class
 
+def load_debris_catalog() -> list:
+    """Load catalogued debris from CelesTrak, caching responses for 15 minutes."""
+    now = datetime.utcnow()
+    cached_at = DEBRIS_CACHE.get("fetched_at")
+    if cached_at and (now - cached_at).total_seconds() < DEBRIS_CACHE_SECONDS:
+        return DEBRIS_CACHE.get("objects", [])
+
+    found = {}
+    for url in CELESTRAK_DEBRIS_URLS:
+        try:
+            response = requests.get(url, timeout=5)
+            response.raise_for_status()
+            lines = [line.strip() for line in response.text.splitlines() if line.strip()]
+            # CelesTrak TLE format is name / line 1 / line 2 per object.
+            index = 0
+            while index + 2 < len(lines):
+                name, line1, line2 = lines[index:index + 3]
+                if line1.startswith("1 ") and line2.startswith("2 "):
+                    catalog_id = line1[2:7].strip()
+                    found[str(catalog_id)] = {
+                        "OBJECT_NAME": name.lstrip("0 ").strip(),
+                        "NORAD_CAT_ID": int(catalog_id),
+                        "TLE_LINE1": line1,
+                        "TLE_LINE2": line2,
+                        "_catalog_type": "Space Debris Fragment",
+                    }
+                    index += 3
+                else:
+                    index += 1
+        except Exception:
+            # A single unavailable debris group should not stop the dashboard.
+            continue
+
+    # Cache successful results, including an empty list, to avoid hammering the provider.
+    if found or DEBRIS_CACHE.get("fetched_at") is None:
+        DEBRIS_CACHE["fetched_at"] = now
+        DEBRIS_CACHE["objects"] = list(found.values())
+    return DEBRIS_CACHE.get("objects", [])
+
+
 def load_satellite_catalog() -> list:
     try:
         sat_res = requests.get(CELESTRAK_URL, timeout=4).json()
@@ -88,6 +138,25 @@ def load_satellite_catalog() -> list:
             with open(LOCAL_SATELLITE_DATA, 'r') as f: return json.load(f)
         except Exception: pass
     return []
+
+# --- Operator sign-in -------------------------------------------------------
+# Credentials come from the environment; the defaults are for local demos only.
+OPERATOR_EMAIL = os.environ.get("SSA_OPERATOR_EMAIL", "operator@ssa.local")
+OPERATOR_PASSWORD = os.environ.get("SSA_OPERATOR_PASSWORD", "orbit2026")
+
+@app.post("/api/login")
+async def login(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    email = str(data.get("email", "")).strip().lower()
+    password = str(data.get("password", ""))
+    ok_email = hmac.compare_digest(email.encode(), OPERATOR_EMAIL.lower().encode())
+    ok_pass = hmac.compare_digest(password.encode(), OPERATOR_PASSWORD.encode())
+    if ok_email and ok_pass:
+        return {"status": "success", "operator": OPERATOR_EMAIL}
+    return JSONResponse({"status": "error", "detail": "Invalid credentials"}, status_code=401)
 
 @app.post("/api/maneuver")
 async def apply_maneuver(request: Request):
@@ -106,6 +175,10 @@ async def apply_maneuver(request: Request):
 def get_conjunctions(solar_flux_override: float = None, time_offset_hours: float = 0.0):
     f107, flare_class = load_solar_weather(solar_flux_override)
     sat_data = load_satellite_catalog()
+    known_ids = {str(row.get("NORAD_CAT_ID")) for row in sat_data}
+    for debris_row in load_debris_catalog():
+        if str(debris_row.get("NORAD_CAT_ID")) not in known_ids:
+            sat_data.append(debris_row)
     drag_sigma_km = 0.8 + (f107 / 100.0) * 1.8
 
     satellites_render = []
@@ -120,7 +193,10 @@ def get_conjunctions(solar_flux_override: float = None, time_offset_hours: float
                 if e == 0:
                     s_name = sat_obj.get('OBJECT_NAME', f'SAT-{idx}')
                     norad_id = sat_obj.get('NORAD_CAT_ID', 10000 + idx)
+                    is_catalog_debris = sat_obj.get("_catalog_type") == "Space Debris Fragment"
                     size_info = estimate_object_size(norad_id, s_name)
+                    if is_catalog_debris:
+                        size_info = {"radius_m": size_info["radius_m"], "type": "Space Debris Fragment"}
                     r_mag = math.sqrt(sum(p**2 for p in pos))
                     inc_deg = math.degrees(sat_rec.inclo)
                     j2_precession = compute_j2_nodal_precession(r_mag, inc_deg)
@@ -166,12 +242,7 @@ def get_conjunctions(solar_flux_override: float = None, time_offset_hours: float
             s["orbit_ring"] = generate_synthetic_orbit_ring(s["pos_eci"])
             satellites_render.append(s)
 
-    far_debris = [
-        {"id": 99001, "name": "COSMOS 2251 DEBRIS (FAR)", "type": "Space Debris Fragment", "radius_m": 0.85, "j2_nodal_precession_deg_day": -3.21, "maneuvered": False, "pos_eci": [14200.5, -16500.2, 11800.8], "vel_eci": [-2.12, 3.85, 1.80], "orbit_ring": generate_synthetic_orbit_ring([14200.5, -16500.2, 11800.8])},
-        {"id": 99002, "name": "FENGYUN 1C DEBRIS (DEEP)", "type": "Space Debris Fragment", "radius_m": 0.90, "j2_nodal_precession_deg_day": -2.85, "maneuvered": False, "pos_eci": [-18500.2, 12800.1, -14200.4], "vel_eci": [3.20, -1.85, -2.80], "orbit_ring": generate_synthetic_orbit_ring([-18500.2, 12800.1, -14200.4])}
-    ]
-    satellites_render.extend(far_debris)
-
+    # Debris markers now come from catalogued CelesTrak debris records, not hardcoded positions.
     conjunction_pairs = []
     num_objs = len(satellites_render)
     for i in range(num_objs):
@@ -196,8 +267,9 @@ def get_conjunctions(solar_flux_override: float = None, time_offset_hours: float
         "conjunction_pairs": conjunction_pairs
     }
 
-if os.path.exists("static"):
-    app.mount("/", StaticFiles(directory="static", html=True), name="static")
+# Frontend lives in public/. Vercel serves public/** from its CDN; this mount serves the same files locally.
+if os.path.isdir(PUBLIC_DIR):
+    app.mount("/", StaticFiles(directory=PUBLIC_DIR, html=True), name="public")
 
 if __name__ == "__main__":
     import uvicorn

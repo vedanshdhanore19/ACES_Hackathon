@@ -43,3 +43,23 @@
 - Codebase fully pushed to GitHub repository.
 - System running locally at `http://localhost:8000`.
 - Platform fully prepared for mid-level evaluation and live judge demonstrations.
+
+---
+
+## 5. Landing / Sign-in (added)
+- **Entry view:** `static/index.html` now opens on a monochrome dark sign-in panel (left tab) over the ThreeUI **Topology Field** (`StructureFlowCollection`, variant `topology-field`, hue 0 / saturation 1.00 / brightness 1.00). Signing in fades the overlay out and reveals the radar dashboard unchanged.
+- **Exact source:** `static/threeui/nexus-topology.html` is the canonical ThreeUI file, byte-for-byte (SHA-256 `2cf632d75ed5a88b32df82839cf9608d8542f7e08b5a0e3072fce94825d1c98d`). Do not edit it; the loader in `index.html` ports ThreeUI's isolation step and renders it in a sandboxed srcDoc iframe.
+- **Backend:** `POST /api/login` (`{email, password}`) in `main.py`. Credentials come from `SSA_OPERATOR_EMAIL` / `SSA_OPERATOR_PASSWORD` (demo defaults: `operator@ssa.local` / `orbit2026`). It gates the UI only; `/api/conjunctions` and `/api/maneuver` are not token-protected.
+
+## 2026-10-11 — Dashboard UI refinement
+- Refined `static/dashboard.html`: bold Space Traffic Risk Engine brand header and orbital emblem; slide-out left navigation with backdrop, close button, and Escape support; brighter starfield; larger Earth framing and tracked-object markers; selected object marker is larger/brighter; removed long implementation notes from the bottom controls and simplified conjunction helper text.
+- Kept existing API endpoint contracts and the current Three.js visualization / maneuver workflows.
+- Added `FRONTEND_REFINEMENT.md` with changes, run instructions, and verification status.
+- Validation performed: inline dashboard JavaScript passed `node --check`; `main.py` passed `py_compile`. No real-browser visual verification performed in this environment.
+
+
+## UI asset and details-panel correction — 2026-10-11
+- Replaced the dashboard logo asset with the user-provided logo image and fixed asset URLs for the project’s root-mounted FastAPI StaticFiles setup (`/space-traffic-logo.png` and `/cosmic-background.jpg`).
+- Replaced the cosmic background asset with the user-provided nebula image.
+- Added an explicit × close button to the floating details panel.
+- Increased orbit-ring contrast and improved Earth texture lighting/contrast without changing backend telemetry.

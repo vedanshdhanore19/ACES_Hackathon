@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orbital Conjunction & Space Traffic Risk Engine</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #070707; }
+
+    #landing {
+      position: fixed; inset: 0; z-index: 20000; background: #070707; color: #fafafa;
+      font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      transition: opacity 0.6s ease, visibility 0.6s ease;
+    }
+    #landing.is-leaving { opacity: 0; visibility: hidden; pointer-events: none; }
+    #landing-field {
+      position: absolute; inset: 0; width: 100%; height: 100%; border: 0;
+      background: #070707; pointer-events: none; opacity: 0; transition: opacity 1.2s ease;
+    }
+    #landing-field.is-ready { opacity: 1; }
+
+    #landing .auth-panel {
+      position: relative; z-index: 2; height: 100%; width: min(460px, 100%);
+      display: flex; flex-direction: column; justify-content: space-between;
+      padding: 40px 48px;
+      background: linear-gradient(180deg, rgba(9, 9, 11, 0.86), rgba(5, 5, 6, 0.93));
+      border-right: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 30px 0 80px -30px rgba(0, 0, 0, 0.9);
+      -webkit-backdrop-filter: blur(24px) saturate(120%); backdrop-filter: blur(24px) saturate(120%);
+    }
+    #landing .auth-brand { display: flex; align-items: center; gap: 12px; font-size: 15px; font-weight: 300; letter-spacing: -0.02em; color: #fafafa; }
+    #landing .auth-brand svg { width: 26px; height: 26px; flex: none; }
+    #landing .auth-eyebrow { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #71717a; margin-bottom: 18px; }
+    #landing h1 { font-size: 40px; font-weight: 300; letter-spacing: -0.03em; line-height: 1; margin-bottom: 14px; color: #fff; }
+    #landing .auth-sub { font-size: 14px; line-height: 1.55; color: #a1a1aa; font-weight: 300; margin-bottom: 36px; max-width: 340px; }
+
+    #landing label { font-size: 12px; font-weight: 400; letter-spacing: 0.01em; color: #a1a1aa; margin-bottom: 8px; display: block; }
+    #landing .auth-field { margin-bottom: 20px; }
+    #landing .auth-input {
+      display: block; width: 100%; padding: 13px 14px; font: 400 14px 'Inter', system-ui, sans-serif; color: #fafafa;
+      background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; outline: none;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    }
+    #landing .auth-input::placeholder { color: #52525b; }
+    #landing .auth-input:hover { border-color: rgba(255, 255, 255, 0.18); }
+    #landing .auth-input:focus { border-color: rgba(255, 255, 255, 0.42); background: rgba(255, 255, 255, 0.045); box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.06); }
+    #landing .auth-input:-webkit-autofill { -webkit-box-shadow: 0 0 0 100px #0c0c0e inset; -webkit-text-fill-color: #fafafa; caret-color: #fafafa; }
+    #landing .auth-pw { position: relative; }
+    #landing .auth-pw .auth-input { padding-right: 62px; }
+    #landing .auth-toggle {
+      position: absolute; top: 50%; right: 8px; transform: translateY(-50%); padding: 6px 8px;
+      background: none; border: 0; border-radius: 6px; cursor: pointer;
+      font: 400 12px 'Inter', system-ui, sans-serif; color: #71717a; transition: color 0.2s ease;
+    }
+    #landing .auth-toggle:hover, #landing .auth-toggle:focus-visible { color: #e4e4e7; outline: none; }
+    #landing .auth-error { min-height: 20px; margin: -4px 0 14px; font-size: 12.5px; line-height: 1.5; color: #d4d4d8; }
+    #landing .auth-submit {
+      width: 100%; padding: 13px 16px; font: 500 14px 'Inter', system-ui, sans-serif; letter-spacing: -0.005em;
+      color: #09090b; background: #fafafa; border: 0; border-radius: 10px; cursor: pointer;
+      transition: background 0.2s ease, transform 0.15s ease, opacity 0.2s ease;
+    }
+    #landing .auth-submit:hover { background: #e4e4e7; }
+    #landing .auth-submit:active { transform: translateY(1px); }
+    #landing .auth-submit:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.5); outline-offset: 3px; }
+    #landing .auth-submit:disabled { opacity: 0.55; cursor: default; }
+    #landing .auth-foot { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: #52525b; }
+    @media (max-width: 640px) {
+      #landing .auth-panel { width: 100%; padding: 28px 24px; border-right: 0; background: rgba(5, 5, 6, 0.9); }
+      #landing h1 { font-size: 34px; }
+    }
+    @media (prefers-reduced-motion: reduce) { #landing, #landing-field { transition: none; } }
+  </style>
+</head>
+<body>
+  <section id="landing" aria-label="Sign in">
+    <iframe id="landing-field" title="Topology Field background" sandbox="allow-scripts" tabindex="-1" aria-hidden="true"></iframe>
+    <aside class="auth-panel">
+      <div class="auth-brand">
+        <svg viewBox="0 0 32 32" fill="none" stroke="#fafafa" stroke-width="1.2" aria-hidden="true">
+          <circle cx="16" cy="16" r="5.5"/>
+          <ellipse cx="16" cy="16" rx="14" ry="6" transform="rotate(-24 16 16)" stroke-opacity="0.7"/>
+          <circle cx="27.4" cy="10.4" r="1.6" fill="#fafafa" stroke="none"/>
+        </svg>
+        <span>Orbital Risk Engine</span>
+      </div>
+
+      <div class="auth-body">
+        <p class="auth-eyebrow">Space Traffic Risk Engine</p>
+        <h1>Sign in</h1>
+        <p class="auth-sub">Access the real-time conjunction screening and orbit prediction console.</p>
+
+        <form id="auth-form" novalidate>
+          <div class="auth-field">
+            <label for="auth-email">Email</label>
+            <input class="auth-input" id="auth-email" name="email" type="email" autocomplete="username" placeholder="operator@agency.org" required>
+          </div>
+          <div class="auth-field">
+            <label for="auth-pass">Password</label>
+            <div class="auth-pw">
+              <input class="auth-input" id="auth-pass" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required>
+              <button class="auth-toggle" id="auth-toggle" type="button" aria-controls="auth-pass" aria-label="Show password">Show</button>
+            </div>
+          </div>
+          <p class="auth-error" id="auth-error" role="alert" aria-live="polite"></p>
+          <button class="auth-submit" id="auth-submit" type="submit">Sign in</button>
+        </form>
+      </div>
+
+      <div class="auth-foot">Restricted &middot; Authorized operators only</div>
+    </aside>
+  </section>
+
+  <script>
+    (function () {
+      var FIELD = { src: '/threeui/nexus-topology.html', background: '#070707', hue: 0, saturation: 1, brightness: 1 };
+      var TARGETS = [{ selector: '#animationCanvas', role: 'background' }];
+
+      function focusStyle() {
+        return '<style data-threeui-focus>\n'
+          + 'html, body { width: 100% !important; height: 100% !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; background: ' + FIELD.background + ' !important; color-scheme: dark !important; }\n'
+          + 'body { position: relative !important; display: flex !important; align-items: center !important; justify-content: center !important; }\n'
+          + 'body > * { visibility: hidden !important; }\n'
+          + 'body[data-threeui-ready] > [data-threeui-role] { visibility: visible !important; }\n'
+          + '[data-threeui-residual] { display: none !important; }\n'
+          + '[data-threeui-role="background"] { position: fixed !important; inset: 0 !important; width: 100% !important; height: 100% !important; max-width: none !important; max-height: none !important; z-index: 0 !important; opacity: 1 !important; pointer-events: none !important; }\n'
+          + '</style>';
+      }
+
+      function focusScript() {
+        var body = '(function () {\n'
+          + '  document.documentElement.dataset.sfMode = "dark";\n'
+          + '  var isolated = false;\n'
+          + '  function isolate() {\n'
+          + '    if (isolated) return;\n'
+          + '    var specs = ' + JSON.stringify(TARGETS).replace(/</g, '\\u003c') + ';\n'
+          + '    var roots = [];\n'
+          + '    specs.forEach(function (spec) {\n'
+          + '      var element = document.querySelector(spec.selector);\n'
+          + '      if (!element) return;\n'
+          + '      element.setAttribute("data-threeui-role", spec.role);\n'
+          + '      if (!roots.some(function (root) { return root.contains(element); })) roots.push(element);\n'
+          + '    });\n'
+          + '    if (!roots.length) return;\n'
+          + '    isolated = true;\n'
+          + '    roots.forEach(function (root) { document.body.appendChild(root); });\n'
+          + '    Array.from(document.body.children).forEach(function (element) {\n'
+          + '      if (roots.indexOf(element) !== -1) return;\n'
+          + '      element.setAttribute("data-threeui-residual", "");\n'
+          + '      element.setAttribute("aria-hidden", "true");\n'
+          + '      if ("inert" in element) element.inert = true;\n'
+          + '    });\n'
+          + '    document.body.setAttribute("data-threeui-ready", "");\n'
+          + '    requestAnimationFrame(function () { window.dispatchEvent(new Event("resize")); });\n'
+          + '  }\n'
+          + '  function scheduleIsolation() { setTimeout(isolate, 100); }\n'
+          + '  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", scheduleIsolation, { once: true });\n'
+          + '  else scheduleIsolation();\n'
+          + '  window.addEventListener("load", isolate, { once: true });\n'
+          + '})();';
+        return '<script data-threeui-focus>\n' + body + '\n<' + '/script>';
+      }
+
+      var landing = document.getElementById('landing');
+      var frame = document.getElementById('landing-field');
+
+      fetch(FIELD.src).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      }).then(function (source) {
+        var style = focusStyle(), script = focusScript();
+        frame.addEventListener('load', function () { frame.classList.add('is-ready'); }, { once: true });
+        frame.srcdoc = source
+          .replace(/<\/head>/i, function () { return style + '</head>'; })
+          .replace(/<\/body>/i, function () { return script + '</body>'; });
+      }).catch(function (err) {
+        console.error('Topology Field failed to load:', err);
+      });
+
+      var form = document.getElementById('auth-form');
+      var email = document.getElementById('auth-email');
+      var pass = document.getElementById('auth-pass');
+      var toggle = document.getElementById('auth-toggle');
+      var errorEl = document.getElementById('auth-error');
+      var submit = document.getElementById('auth-submit');
+
+      toggle.addEventListener('click', function () {
+        var show = pass.type === 'password';
+        pass.type = show ? 'text' : 'password';
+        toggle.textContent = show ? 'Hide' : 'Show';
+        toggle.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+      });
+
+      function enter() {
+        landing.classList.add('is-leaving');
+        setTimeout(function () { window.location.href = '/dashboard.html'; }, 280);
+      }
+
+      form.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        errorEl.textContent = '';
+        if (!email.value.trim() || !pass.value) { errorEl.textContent = 'Enter your email and password.'; return; }
+        submit.disabled = true; submit.textContent = 'Signing in\u2026';
+        try {
+          var res = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: email.value.trim(), password: pass.value })
+          });
+          if (res.ok) { enter(); return; }
+          errorEl.textContent = res.status === 401 ? 'Incorrect email or password.' : 'Sign-in is unavailable right now. Please try again.';
+        } catch (err) {
+          errorEl.textContent = 'Cannot reach the server. Check that the backend is running.';
+        }
+        submit.disabled = false; submit.textContent = 'Sign in';
+        pass.select();
+      });
+
+      setTimeout(function () { email.focus(); }, 300);
+    })();
+  </script>
+</body>
+</html>

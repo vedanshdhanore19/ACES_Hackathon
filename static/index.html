@@ -2,425 +2,223 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Orbital Conjunction & Space Traffic Risk Engine</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #02050e; color: #00ffcc; font-family: 'Courier New', monospace; overflow: hidden; }
-    #canvas-container { width: 100vw; height: 100vh; }
-    
-    #hud {
-      position: absolute; top: 20px; left: 20px;
-      background: rgba(3, 10, 24, 0.94); border: 1px solid #00ffcc;
-      box-shadow: 0 0 20px rgba(0, 255, 204, 0.25);
-      padding: 16px; border-radius: 8px; width: 430px; z-index: 100;
-    }
-    h2 { font-size: 12px; margin-bottom: 8px; color: #ffffff; border-bottom: 1px solid #00ffcc; padding-bottom: 4px; letter-spacing: 1px; }
-    .control-group { margin-bottom: 12px; }
-    label { font-size: 11px; display: block; margin-bottom: 4px; color: #00ffcc; }
-    input[type=range] { width: 100%; accent-color: #ff3366; cursor: pointer; }
-    #alerts-list { max-height: 280px; overflow-y: auto; margin-top: 8px; padding-right: 4px; }
-    .alert-card {
-      background: rgba(255, 51, 102, 0.08); border-left: 3px solid #ff3366;
-      padding: 10px; margin-bottom: 12px; border-radius: 4px; font-size: 10px; line-height: 1.5;
-    }
-    .alert-card.sat-sat { background: rgba(0, 255, 204, 0.08); border-left-color: #00ffcc; }
-    .badge-sat { background: #00ffcc; color: #000; padding: 1px 4px; font-weight: bold; border-radius: 2px; font-size: 9px; display: inline-block; margin-bottom: 4px; }
-    .badge-deb { background: #ff9900; color: #000; padding: 1px 4px; font-weight: bold; border-radius: 2px; font-size: 9px; display: inline-block; margin-bottom: 4px; }
-    .badge-flare { background: #ff0055; color: #fff; padding: 2px 6px; font-weight: bold; border-radius: 3px; font-size: 10px; float: right; }
-    
-    .btn-maneuver {
-      background: rgba(0, 255, 204, 0.25); border: 1px solid #00ffcc; color: #00ffcc;
-      padding: 8px 14px; margin-top: 6px; cursor: pointer; font-size: 11px; border-radius: 3px; font-weight: bold;
-      pointer-events: auto !important; position: relative; z-index: 2000;
-    }
-    .btn-maneuver:hover { background: #00ffcc; color: #000; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #070707; }
 
-    #timeline-hud {
-      position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-      background: rgba(3, 10, 24, 0.94); border: 1px solid #00ffcc;
-      box-shadow: 0 0 20px rgba(0, 255, 204, 0.25);
-      padding: 12px 24px; border-radius: 8px; width: 600px; z-index: 100; text-align: center;
+    #landing {
+      position: fixed; inset: 0; z-index: 20000; background: #070707; color: #fafafa;
+      font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      transition: opacity 0.6s ease, visibility 0.6s ease;
     }
+    #landing.is-leaving { opacity: 0; visibility: hidden; pointer-events: none; }
+    #landing-field {
+      position: absolute; inset: 0; width: 100%; height: 100%; border: 0;
+      background: #070707; pointer-events: none; opacity: 0; transition: opacity 1.2s ease;
+    }
+    #landing-field.is-ready { opacity: 1; }
 
-    #inspector {
-      position: absolute; top: 20px; right: 20px;
-      background: rgba(3, 10, 24, 0.94); border: 1px solid #ffcc00;
-      box-shadow: 0 0 20px rgba(255, 204, 0, 0.25);
-      padding: 16px; border-radius: 8px; width: 340px; z-index: 100; display: none;
+    #landing .auth-panel {
+      position: relative; z-index: 2; height: 100%; width: min(460px, 100%);
+      display: flex; flex-direction: column; justify-content: space-between;
+      padding: 40px 48px;
+      background: linear-gradient(180deg, rgba(9, 9, 11, 0.86), rgba(5, 5, 6, 0.93));
+      border-right: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 30px 0 80px -30px rgba(0, 0, 0, 0.9);
+      -webkit-backdrop-filter: blur(24px) saturate(120%); backdrop-filter: blur(24px) saturate(120%);
     }
-    .close-btn { float: right; cursor: pointer; color: #ff3366; font-weight: bold; }
-    .data-row { font-size: 11px; margin-bottom: 6px; color: #ffffff; }
+    #landing .auth-brand { display: flex; align-items: center; gap: 12px; font-size: 15px; font-weight: 300; letter-spacing: -0.02em; color: #fafafa; }
+    #landing .auth-brand svg { width: 26px; height: 26px; flex: none; }
+    #landing .auth-eyebrow { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #71717a; margin-bottom: 18px; }
+    #landing h1 { font-size: 40px; font-weight: 300; letter-spacing: -0.03em; line-height: 1; margin-bottom: 14px; color: #fff; }
+    #landing .auth-sub { font-size: 14px; line-height: 1.55; color: #a1a1aa; font-weight: 300; margin-bottom: 36px; max-width: 340px; }
 
-    #modal-planner {
-      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      background: rgba(5, 15, 35, 0.98); border: 2px solid #ff3366;
-      box-shadow: 0 0 50px rgba(255, 51, 102, 0.8);
-      padding: 20px; border-radius: 8px; width: 450px; z-index: 9999; display: none;
+    #landing label { font-size: 12px; font-weight: 400; letter-spacing: 0.01em; color: #a1a1aa; margin-bottom: 8px; display: block; }
+    #landing .auth-field { margin-bottom: 20px; }
+    #landing .auth-input {
+      display: block; width: 100%; padding: 13px 14px; font: 400 14px 'Inter', system-ui, sans-serif; color: #fafafa;
+      background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; outline: none;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
     }
-    .strategy-card {
-      background: rgba(255,255,255,0.05); border: 1px solid #00ffcc;
-      padding: 12px; margin-top: 10px; border-radius: 4px; font-size: 11px; line-height: 1.5;
+    #landing .auth-input::placeholder { color: #52525b; }
+    #landing .auth-input:hover { border-color: rgba(255, 255, 255, 0.18); }
+    #landing .auth-input:focus { border-color: rgba(255, 255, 255, 0.42); background: rgba(255, 255, 255, 0.045); box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.06); }
+    #landing .auth-input:-webkit-autofill { -webkit-box-shadow: 0 0 0 100px #0c0c0e inset; -webkit-text-fill-color: #fafafa; caret-color: #fafafa; }
+    #landing .auth-pw { position: relative; }
+    #landing .auth-pw .auth-input { padding-right: 62px; }
+    #landing .auth-toggle {
+      position: absolute; top: 50%; right: 8px; transform: translateY(-50%); padding: 6px 8px;
+      background: none; border: 0; border-radius: 6px; cursor: pointer;
+      font: 400 12px 'Inter', system-ui, sans-serif; color: #71717a; transition: color 0.2s ease;
     }
+    #landing .auth-toggle:hover, #landing .auth-toggle:focus-visible { color: #e4e4e7; outline: none; }
+    #landing .auth-error { min-height: 20px; margin: -4px 0 14px; font-size: 12.5px; line-height: 1.5; color: #d4d4d8; }
+    #landing .auth-submit {
+      width: 100%; padding: 13px 16px; font: 500 14px 'Inter', system-ui, sans-serif; letter-spacing: -0.005em;
+      color: #09090b; background: #fafafa; border: 0; border-radius: 10px; cursor: pointer;
+      transition: background 0.2s ease, transform 0.15s ease, opacity 0.2s ease;
+    }
+    #landing .auth-submit:hover { background: #e4e4e7; }
+    #landing .auth-submit:active { transform: translateY(1px); }
+    #landing .auth-submit:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.5); outline-offset: 3px; }
+    #landing .auth-submit:disabled { opacity: 0.55; cursor: default; }
+    #landing .auth-foot { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: #52525b; }
+    @media (max-width: 640px) {
+      #landing .auth-panel { width: 100%; padding: 28px 24px; border-right: 0; background: rgba(5, 5, 6, 0.9); }
+      #landing h1 { font-size: 34px; }
+    }
+    @media (prefers-reduced-motion: reduce) { #landing, #landing-field { transition: none; } }
   </style>
 </head>
 <body>
-
-  <div id="hud">
-    <span class="badge-flare" id="flareBadge">NOAA: C-CLASS</span>
-    <h2>REAL-TIME KINEMATIC SSA RADAR</h2>
-    
-    <div class="control-group">
-      <label>SOLAR FLARE FLUX (F10.7): <span id="fluxVal">150</span> sfu</label>
-      <input type="range" id="fluxSlider" min="70" max="350" value="150" oninput="updateSimulation()">
-      <div style="font-size:10px; color:#00ffcc; margin-top:4px;">
-        Tracked Objects: <b id="totalObjCount" style="color:#ffcc00">--</b> | Drag Sigma: <b id="dragVal" style="color:#ffcc00">--</b> km
+  <section id="landing" aria-label="Sign in">
+    <iframe id="landing-field" title="Topology Field background" sandbox="allow-scripts" tabindex="-1" aria-hidden="true"></iframe>
+    <aside class="auth-panel">
+      <div class="auth-brand">
+        <svg viewBox="0 0 32 32" fill="none" stroke="#fafafa" stroke-width="1.2" aria-hidden="true">
+          <circle cx="16" cy="16" r="5.5"/>
+          <ellipse cx="16" cy="16" rx="14" ry="6" transform="rotate(-24 16 16)" stroke-opacity="0.7"/>
+          <circle cx="27.4" cy="10.4" r="1.6" fill="#fafafa" stroke="none"/>
+        </svg>
+        <span>Orbital Risk Engine</span>
       </div>
-    </div>
 
-    <h2>CRITICAL CONJUNCTIONS (<span id="alertCount">0</span>)</h2>
-    <div id="alerts-list">Initializing radar feed...</div>
+      <div class="auth-body">
+        <p class="auth-eyebrow">Space Traffic Risk Engine</p>
+        <h1>Sign in</h1>
+        <p class="auth-sub">Access the real-time conjunction screening and orbit prediction console.</p>
 
-    <button id="btn-debrief" class="btn-maneuver" style="width:100%; margin-top:10px;">
-      🎙️ VOICE MISSION DEBRIEF
-    </button>
-  </div>
+        <form id="auth-form" novalidate>
+          <div class="auth-field">
+            <label for="auth-email">Email</label>
+            <input class="auth-input" id="auth-email" name="email" type="email" autocomplete="username" placeholder="operator@agency.org" required>
+          </div>
+          <div class="auth-field">
+            <label for="auth-pass">Password</label>
+            <div class="auth-pw">
+              <input class="auth-input" id="auth-pass" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required>
+              <button class="auth-toggle" id="auth-toggle" type="button" aria-controls="auth-pass" aria-label="Show password">Show</button>
+            </div>
+          </div>
+          <p class="auth-error" id="auth-error" role="alert" aria-live="polite"></p>
+          <button class="auth-submit" id="auth-submit" type="submit">Sign in</button>
+        </form>
+      </div>
 
-  <div id="timeline-hud">
-    <label style="font-size:11px; color:#ffffff;">4D ORBIT TIME-TRAVEL SCRUBBER: <b id="timeVal" style="color:#00ffcc">T+0.0 hours</b></label>
-    <input type="range" id="timeSlider" min="0" max="24" step="0.5" value="0" oninput="updateSimulation()">
-  </div>
-
-  <div id="inspector">
-    <span class="close-btn" id="btn-close-inspector">[X] CLOSE</span>
-    <h2 style="border-color:#ffcc00; color:#ffcc00;">3D OBJECT INSPECTOR</h2>
-    <div class="data-row">Name: <b id="insp-name" style="color:#00ffcc">--</b></div>
-    <div class="data-row">Type: <b id="insp-type" style="color:#00ffcc">--</b></div>
-    <div class="data-row">Hard-Body Radius: <b id="insp-radius" style="color:#00ffcc">--</b> m</div>
-    <div class="data-row">J2 Nodal Precession: <b id="insp-j2" style="color:#00ffcc">--</b> °/day</div>
-    <div class="data-row">Current Speed: <b id="insp-speed" style="color:#00ffcc">--</b> km/s</div>
-    <div class="data-row">Space ECI (X): <b id="insp-x" style="color:#00ffcc">--</b> km</div>
-    <div class="data-row">Space ECI (Y): <b id="insp-y" style="color:#00ffcc">--</b> km</div>
-    <div class="data-row">Space ECI (Z): <b id="insp-z" style="color:#00ffcc">--</b> km</div>
-  </div>
-
-  <div id="modal-planner">
-    <span class="close-btn" id="btn-close-planner">[X] CLOSE</span>
-    <h2 style="border-color:#ff3366; color:#ff3366;">AVOIDANCE MANEUVER SIMULATOR</h2>
-    <p style="font-size:11px; margin-top:6px; color:#ffffff;">Select optimal avoidance strategy for <b id="plan-sat" style="color:#00ffcc">STARLINK-3104</b>:</p>
-
-    <div class="strategy-card">
-      <b style="color:#00ffcc">STRATEGY A: OPTIMAL FUEL BURN (0.18 m/s)</b><br>
-      • Posigrade Thrust: <b>+0.18 m/s Velocity Delta</b><br>
-      • Hydrazine Fuel Cost: <b>2.55 kg</b><br>
-      • Target Orbit Shift: <b>+2,500 km Clearance</b><br>
-      <button class="btn-maneuver" id="btn-exec-a" style="margin-top:8px;">EXECUTE BURN A</button>
-    </div>
-
-    <div class="strategy-card">
-      <b style="color:#ffcc00">STRATEGY B: MAXIMUM CLEARANCE BUFFER (0.52 m/s)</b><br>
-      • Retrograde Thrust: <b>+0.52 m/s Velocity Delta</b><br>
-      • Hydrazine Fuel Cost: <b>7.38 kg</b><br>
-      • Target Orbit Shift: <b>+5,000 km Clearance</b><br>
-      <button class="btn-maneuver" id="btn-exec-b" style="margin-top:8px;">EXECUTE BURN B</button>
-    </div>
-  </div>
-
-  <div id="canvas-container"></div>
+      <div class="auth-foot">Restricted &middot; Authorized operators only</div>
+    </aside>
+  </section>
 
   <script>
-    let activeTargetSatName = "STARLINK-3104";
+    (function () {
+      var FIELD = { src: '/threeui/nexus-topology.html', background: '#070707', hue: 0, saturation: 1, brightness: 1 };
+      var TARGETS = [{ selector: '#animationCanvas', role: 'background' }];
 
-    function speakTacticalAlert(text) {
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 0.98;
-        utterance.pitch = 0.90;
-        window.speechSynthesis.speak(utterance);
+      function focusStyle() {
+        return '<style data-threeui-focus>\n'
+          + 'html, body { width: 100% !important; height: 100% !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; background: ' + FIELD.background + ' !important; color-scheme: dark !important; }\n'
+          + 'body { position: relative !important; display: flex !important; align-items: center !important; justify-content: center !important; }\n'
+          + 'body > * { visibility: hidden !important; }\n'
+          + 'body[data-threeui-ready] > [data-threeui-role] { visibility: visible !important; }\n'
+          + '[data-threeui-residual] { display: none !important; }\n'
+          + '[data-threeui-role="background"] { position: fixed !important; inset: 0 !important; width: 100% !important; height: 100% !important; max-width: none !important; max-height: none !important; z-index: 0 !important; opacity: 1 !important; pointer-events: none !important; }\n'
+          + '</style>';
       }
-    }
 
-    const container = document.getElementById('canvas-container');
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 0, 36);
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    container.appendChild(renderer.domElement);
-
-    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-
-    const earthGeo = new THREE.SphereGeometry(6.371, 32, 32);
-    const earthMat = new THREE.MeshBasicMaterial({ color: 0x0a192f, wireframe: true });
-    const earth = new THREE.Mesh(earthGeo, earthMat);
-    scene.add(earth);
-
-    const atmosphereGeo = new THREE.SphereGeometry(6.85, 32, 32);
-    const atmosphereMat = new THREE.MeshBasicMaterial({ color: 0x00aaff, transparent: true, opacity: 0.18, wireframe: true });
-    const atmosphereMesh = new THREE.Mesh(atmosphereGeo, atmosphereMat);
-    scene.add(atmosphereMesh);
-
-    let trackedObjects = [];
-    let conjunctionPairs = [];
-    let selectedObject = null;
-
-    const objectsGroup = new THREE.Group();
-    const orbitRingsGroup = new THREE.Group();
-    const linesGroup = new THREE.Group();
-    scene.add(objectsGroup);
-    scene.add(orbitRingsGroup);
-    scene.add(linesGroup);
-
-    const raycaster = new THREE.Raycaster();
-    const mouse = new THREE.Vector2();
-
-    async function updateSimulation() {
-      const fluxVal = document.getElementById('fluxSlider').value;
-      const timeVal = document.getElementById('timeSlider').value;
-
-      document.getElementById('timeVal').innerText = `T+${timeVal} hours`;
-      const normalizedFlux = (fluxVal - 70) / 280;
-      atmosphereMesh.scale.setScalar(1.0 + normalizedFlux * 0.12);
-      atmosphereMat.color.setHSL(0.55 - normalizedFlux * 0.55, 1.0, 0.5);
-
-      try {
-        const res = await fetch(`/api/conjunctions?solar_flux_override=${fluxVal}&time_offset_hours=${timeVal}`);
-        const data = await res.json();
-
-        document.getElementById('fluxVal').innerText = data.f107_index;
-        document.getElementById('dragVal').innerText = data.drag_covariance_sigma_km;
-        document.getElementById('totalObjCount').innerText = data.active_satellites_count;
-        document.getElementById('flareBadge').innerText = `NOAA: ${data.solar_flare_class}`;
-
-        while(objectsGroup.children.length > 0) { objectsGroup.remove(objectsGroup.children[0]); }
-        while(orbitRingsGroup.children.length > 0) { orbitRingsGroup.remove(orbitRingsGroup.children[0]); }
-        trackedObjects = [];
-
-        data.objects.forEach(obj => {
-          const isFarDebris = obj.type.includes("Debris");
-          const geo = new THREE.SphereGeometry(isFarDebris ? 0.22 : 0.15, 8, 8);
-          const mat = new THREE.MeshBasicMaterial({ color: isFarDebris ? 0xff9900 : (obj.maneuvered ? 0x00ff55 : 0x00ffcc) });
-          const mesh = new THREE.Mesh(geo, mat);
-          
-          mesh.position.set(obj.pos_eci[0] * 0.001, obj.pos_eci[1] * 0.001, obj.pos_eci[2] * 0.001);
-          
-          const tracker = {
-            id: obj.id,
-            name: obj.name,
-            type: obj.type,
-            radius_m: obj.radius_m,
-            j2_nodal_precession_deg_day: obj.j2_nodal_precession_deg_day,
-            maneuvered: obj.maneuvered,
-            pos: [...obj.pos_eci],
-            vel: [...obj.vel_eci],
-            mesh: mesh
-          };
-          
-          mesh.userData = tracker;
-          objectsGroup.add(mesh);
-          trackedObjects.push(tracker);
-
-          if (obj.orbit_ring && obj.orbit_ring.length > 0) {
-            const ringPoints = obj.orbit_ring.map(p => new THREE.Vector3(p[0] * 0.001, p[1] * 0.001, p[2] * 0.001));
-            const ringGeo = new THREE.BufferGeometry().setFromPoints(ringPoints);
-            const ringMat = new THREE.LineBasicMaterial({
-              color: isFarDebris ? 0xff9900 : (obj.maneuvered ? 0x00ff55 : 0x00ffcc),
-              transparent: true,
-              opacity: isFarDebris ? 0.15 : 0.35
-            });
-            orbitRingsGroup.add(new THREE.LineLoop(ringGeo, ringMat));
-          }
-        });
-
-        conjunctionPairs = data.conjunction_pairs;
-        renderHUDCards();
-
-      } catch (err) {
-        console.error("Simulation error:", err);
+      function focusScript() {
+        var body = '(function () {\n'
+          + '  document.documentElement.dataset.sfMode = "dark";\n'
+          + '  var isolated = false;\n'
+          + '  function isolate() {\n'
+          + '    if (isolated) return;\n'
+          + '    var specs = ' + JSON.stringify(TARGETS).replace(/</g, '\\u003c') + ';\n'
+          + '    var roots = [];\n'
+          + '    specs.forEach(function (spec) {\n'
+          + '      var element = document.querySelector(spec.selector);\n'
+          + '      if (!element) return;\n'
+          + '      element.setAttribute("data-threeui-role", spec.role);\n'
+          + '      if (!roots.some(function (root) { return root.contains(element); })) roots.push(element);\n'
+          + '    });\n'
+          + '    if (!roots.length) return;\n'
+          + '    isolated = true;\n'
+          + '    roots.forEach(function (root) { document.body.appendChild(root); });\n'
+          + '    Array.from(document.body.children).forEach(function (element) {\n'
+          + '      if (roots.indexOf(element) !== -1) return;\n'
+          + '      element.setAttribute("data-threeui-residual", "");\n'
+          + '      element.setAttribute("aria-hidden", "true");\n'
+          + '      if ("inert" in element) element.inert = true;\n'
+          + '    });\n'
+          + '    document.body.setAttribute("data-threeui-ready", "");\n'
+          + '    requestAnimationFrame(function () { window.dispatchEvent(new Event("resize")); });\n'
+          + '  }\n'
+          + '  function scheduleIsolation() { setTimeout(isolate, 100); }\n'
+          + '  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", scheduleIsolation, { once: true });\n'
+          + '  else scheduleIsolation();\n'
+          + '  window.addEventListener("load", isolate, { once: true });\n'
+          + '})();';
+        return '<script data-threeui-focus>\n' + body + '\n<' + '/script>';
       }
-    }
 
-    function renderHUDCards() {
-      const list = document.getElementById('alerts-list');
-      list.innerHTML = '';
+      var landing = document.getElementById('landing');
+      var frame = document.getElementById('landing-field');
 
-      let evaluatedPairs = [];
-      conjunctionPairs.forEach(pair => {
-        const o1 = trackedObjects.find(o => o.name === pair.sat1_name);
-        const o2 = trackedObjects.find(o => o.name === pair.sat2_name);
+      fetch(FIELD.src).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      }).then(function (source) {
+        var style = focusStyle(), script = focusScript();
+        frame.addEventListener('load', function () { frame.classList.add('is-ready'); }, { once: true });
+        frame.srcdoc = source
+          .replace(/<\/head>/i, function () { return style + '</head>'; })
+          .replace(/<\/body>/i, function () { return script + '</body>'; });
+      }).catch(function (err) {
+        console.error('Topology Field failed to load:', err);
+      });
 
-        if (o1 && o2) {
-          const distKm = Math.sqrt(
-            Math.pow(o1.pos[0] - o2.pos[0], 2) +
-            Math.pow(o1.pos[1] - o2.pos[1], 2) +
-            Math.pow(o1.pos[2] - o2.pos[2], 2)
-          );
+      var form = document.getElementById('auth-form');
+      var email = document.getElementById('auth-email');
+      var pass = document.getElementById('auth-pass');
+      var toggle = document.getElementById('auth-toggle');
+      var errorEl = document.getElementById('auth-error');
+      var submit = document.getElementById('auth-submit');
 
-          const relVel = Math.sqrt(
-            Math.pow(o1.vel[0] - o2.vel[0], 2) +
-            Math.pow(o1.vel[1] - o2.vel[1], 2) +
-            Math.pow(o1.vel[2] - o2.vel[2], 2)
-          );
+      toggle.addEventListener('click', function () {
+        var show = pass.type === 'password';
+        pass.type = show ? 'text' : 'password';
+        toggle.textContent = show ? 'Hide' : 'Show';
+        toggle.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+      });
 
-          evaluatedPairs.push({ o1, o2, distKm, relVel, event_type: pair.event_type });
+      function enter() {
+        landing.classList.add('is-leaving');
+        setTimeout(function () { window.location.href = '/dashboard.html'; }, 280);
+      }
+
+      form.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        errorEl.textContent = '';
+        if (!email.value.trim() || !pass.value) { errorEl.textContent = 'Enter your email and password.'; return; }
+        submit.disabled = true; submit.textContent = 'Signing in\u2026';
+        try {
+          var res = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: email.value.trim(), password: pass.value })
+          });
+          if (res.ok) { enter(); return; }
+          errorEl.textContent = res.status === 401 ? 'Incorrect email or password.' : 'Sign-in is unavailable right now. Please try again.';
+        } catch (err) {
+          errorEl.textContent = 'Cannot reach the server. Check that the backend is running.';
         }
+        submit.disabled = false; submit.textContent = 'Sign in';
+        pass.select();
       });
 
-      evaluatedPairs.sort((a, b) => a.distKm - b.distKm);
-      const topAlerts = evaluatedPairs.slice(0, 5);
-      document.getElementById('alertCount').innerText = topAlerts.length;
-
-      topAlerts.forEach(item => {
-        const tcaSec = Math.max(0.1, (item.distKm / (item.relVel + 0.001)));
-        const isSatSat = item.event_type.includes("SATELLITE ↔ SATELLITE");
-        const isMitigated = item.o1.maneuvered || item.o2.maneuvered;
-
-        const card = document.createElement('div');
-        card.className = `alert-card ${isSatSat ? 'sat-sat' : ''}`;
-        if (isMitigated) {
-          card.style.borderLeftColor = "#00ff55";
-          card.style.background = "rgba(0, 255, 85, 0.12)";
-        }
-
-        card.innerHTML = `
-          <span class="${isSatSat ? 'badge-sat' : 'badge-deb'}">${item.event_type}</span>
-          ${isMitigated ? '<b style="color:#00ff55; float:right;">[MITIGATED]</b>' : ''}<br>
-          <b style="color:#ffffff">${item.o1.name}</b> ⚡ <b style="color:#ffffff">${item.o2.name}</b><br>
-          Miss Dist: <b style="color:${isMitigated ? '#00ff55' : '#ffcc00'}">${item.distKm.toFixed(2)} km</b> | Closing Speed: <b>${item.relVel.toFixed(2)} km/s</b><br>
-          🎯 <b>PREDICTED CONTACT:</b> TCA: <b style="color:#ff0055">T+${tcaSec.toFixed(1)}s</b><br>
-          <button class="btn-maneuver open-planner-btn" data-sat="${item.o1.name}">
-            ${isMitigated ? 'ADJUST MANEUVER BURN' : 'SIMULATE AVOIDANCE BURN'}
-          </button>
-        `;
-        list.appendChild(card);
-      });
-
-      document.querySelectorAll('.open-planner-btn').forEach(btn => {
-        const handler = function(e) {
-          e.preventDefault();
-          e.stopPropagation();
-          const satName = this.getAttribute('data-sat');
-          activeTargetSatName = satName;
-          document.getElementById('plan-sat').innerText = satName;
-          document.getElementById('modal-planner').style.display = 'block';
-          speakTacticalAlert(`Warning: Conjunction detected for ${satName}. Avoidance maneuver required.`);
-        };
-        btn.onclick = handler;
-      });
-    }
-
-    const dt = 0.02;
-    function animate() {
-      requestAnimationFrame(animate);
-
-      trackedObjects.forEach(obj => {
-        obj.pos[0] += obj.vel[0] * dt;
-        obj.pos[1] += obj.vel[1] * dt;
-        obj.pos[2] += obj.vel[2] * dt;
-        obj.mesh.position.set(obj.pos[0] * 0.001, obj.pos[1] * 0.001, obj.pos[2] * 0.001);
-      });
-
-      if (selectedObject) {
-        const speed = Math.sqrt(selectedObject.vel[0]**2 + selectedObject.vel[1]**2 + selectedObject.vel[2]**2);
-        document.getElementById('insp-speed').innerText = speed.toFixed(3);
-        document.getElementById('insp-x').innerText = selectedObject.pos[0].toFixed(2);
-        document.getElementById('insp-y').innerText = selectedObject.pos[1].toFixed(2);
-        document.getElementById('insp-z').innerText = selectedObject.pos[2].toFixed(2);
-      }
-
-      earth.rotation.y += 0.0005;
-      atmosphereMesh.rotation.y += 0.0005;
-      controls.update();
-      renderer.render(scene, camera);
-    }
-
-    document.getElementById('btn-debrief').onclick = () => {
-      speakTacticalAlert('Radar system operational. Tracking satellite constellations and orbital debris field in real time.');
-    };
-
-    document.getElementById('btn-close-inspector').onclick = () => {
-      document.getElementById('inspector').style.display = 'none';
-      selectedObject = null;
-    };
-
-    document.getElementById('btn-close-planner').onclick = () => {
-      document.getElementById('modal-planner').style.display = 'none';
-    };
-
-    async function sendManeuverToBackend(strategy) {
-      const satName = activeTargetSatName || document.getElementById('plan-sat').innerText || "STARLINK-3104";
-      
-      // Client-side local application for immediate visual feedback
-      const targetObj = trackedObjects.find(o => o.name === satName);
-      if (targetObj) {
-        const offsetDist = strategy === 'A' ? 2500.0 : 5000.0;
-        targetObj.pos[0] += offsetDist;
-        targetObj.pos[1] += offsetDist * 0.5;
-        targetObj.maneuvered = true;
-      }
-
-      document.getElementById('modal-planner').style.display = 'none';
-      speakTacticalAlert(`Strategy ${strategy} burn sequence committed for ${satName}. Threat mitigated.`);
-      
-      try {
-        await fetch('/api/maneuver', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sat_name: satName, strategy: strategy })
-        });
-        updateSimulation();
-      } catch (err) {
-        console.error("Maneuver API error:", err);
-      }
-    }
-
-    const btnA = document.getElementById('btn-exec-a');
-    const btnB = document.getElementById('btn-exec-b');
-
-    btnA.onclick = (e) => { e.preventDefault(); e.stopPropagation(); sendManeuverToBackend('A'); };
-    btnB.onclick = (e) => { e.preventDefault(); e.stopPropagation(); sendManeuverToBackend('B'); };
-
-    btnA.addEventListener('mousedown', (e) => e.stopPropagation());
-    btnB.addEventListener('mousedown', (e) => e.stopPropagation());
-
-    window.addEventListener('click', (event) => {
-      if (event.target.closest('#hud') || event.target.closest('#inspector') || event.target.closest('#modal-planner') || event.target.closest('#timeline-hud')) {
-        return;
-      }
-
-      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-
-      raycaster.setFromCamera(mouse, camera);
-      const intersects = raycaster.intersectObjects(objectsGroup.children);
-
-      if (intersects.length > 0) {
-        const objData = intersects[0].object.userData;
-        selectedObject = objData;
-
-        document.getElementById('insp-name').innerText = objData.name;
-        document.getElementById('insp-type').innerText = objData.type;
-        document.getElementById('insp-radius').innerText = objData.radius_m;
-        document.getElementById('insp-j2').innerText = objData.j2_nodal_precession_deg_day;
-        document.getElementById('inspector').style.display = 'block';
-
-        speakTacticalAlert(`Target locked: ${objData.name}. Object classification: ${objData.type}.`);
-      }
-    });
-
-    updateSimulation();
-    animate();
-
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
+      setTimeout(function () { email.focus(); }, 300);
+    })();
   </script>
 </body>
 </html>

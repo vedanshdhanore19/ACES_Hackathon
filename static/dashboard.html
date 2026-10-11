@@ -1,0 +1,1639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Space Traffic Risk Engine</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* ───────── Design tokens ───────── */
+    :root {
+      --space: #000000;
+      --panel: #07090d;
+      --raised: #0c1016;
+      --raised-2: #121821;
+      --line: #1a212b;
+      --line-strong: #2b3542;
+      --text: #e8edf4;
+      --muted: #9ba7b7;
+      --faint: #6c7889;
+      --accent: #7db3ff;
+      --accent-soft: rgba(125, 179, 255, .14);
+      --amber: #e0a93b;
+      --amber-soft: rgba(224, 169, 59, .14);
+      --red: #ef6a60;
+      --red-soft: rgba(239, 106, 96, .14);
+      --ok: #5fd0a0;
+
+      --header: 64px;
+      --aside: 420px;
+      --sidebar: 280px;
+
+      /* spacing scale */
+      --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px;
+      --r: 12px; --r-sm: 8px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%; overflow: hidden;
+      background: var(--space); color: var(--text);
+      font-family: "IBM Plex Sans", system-ui, sans-serif;
+      font-size: 14px; line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input, select { font-family: inherit; font-size: inherit; color: inherit; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    [hidden] { display: none !important; }
+
+    /* ───────── App grid ───────── */
+    .app {
+      position: relative; display: grid; width: 100%; height: 100%; overflow: hidden;
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: var(--header) minmax(0, 1fr) auto;
+      grid-template-areas: "header" "stage" "dock";
+    }
+    .app.aside-open {
+      grid-template-columns: minmax(0, 1fr) var(--aside);
+      grid-template-areas: "header header" "stage aside" "dock dock";
+    }
+
+    /* ───────── Header ───────── */
+    header {
+      grid-area: header; display: flex; align-items: center; gap: var(--s4);
+      padding: 0 var(--s5); min-width: 0;
+      background: var(--space); border-bottom: 1px solid var(--line);
+      position: relative; z-index: 20;
+    }
+    .icon-btn {
+      display: inline-flex; align-items: center; justify-content: center; flex: none;
+      width: 40px; height: 40px; border-radius: var(--r-sm);
+      background: var(--raised); border: 1px solid var(--line-strong);
+      cursor: pointer; transition: background .15s, border-color .15s;
+    }
+    .icon-btn:hover { background: var(--raised-2); border-color: #3d4a5c; }
+    .icon-btn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; }
+    .header-brand { display: flex; align-items: center; gap: var(--s3); min-width: 0; }
+    .header-mark { width: 28px; height: 28px; flex: none; }
+    .header-name { font-size: 19px; font-weight: 500; letter-spacing: -.02em; white-space: nowrap; }
+    .header-meta { margin-left: auto; display: flex; align-items: center; gap: var(--s3); min-width: 0; }
+    .status-pill {
+      display: inline-flex; align-items: center; gap: var(--s2);
+      height: 32px; padding: 0 var(--s3); border-radius: 999px;
+      border: 1px solid var(--line-strong); color: var(--muted); font-size: 13px; white-space: nowrap;
+    }
+    .time-pill { height: 32px; display: inline-flex; align-items: center; padding: 0 var(--s3); border-radius: 999px; background: var(--raised); border: 1px solid var(--line); font-size: 13px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); display: inline-block; flex: none; }
+    .dot.ok { background: var(--ok); box-shadow: 0 0 8px rgba(95, 208, 160, .7); }
+    .dot.warn { background: var(--amber); }
+    .dot.bad { background: var(--red); box-shadow: 0 0 8px rgba(239, 106, 96, .7); }
+
+    /* ───────── Buttons ───────── */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: var(--s2);
+      min-height: 38px; padding: 0 var(--s4); border-radius: var(--r-sm);
+      background: var(--raised-2); border: 1px solid var(--line-strong);
+      font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;
+      transition: background .15s, border-color .15s, color .15s;
+    }
+    .btn:hover { background: #1a2230; border-color: #43516a; }
+    .btn.primary { background: var(--accent-soft); border-color: rgba(125, 179, 255, .45); color: #cfe3ff; }
+    .btn.primary:hover { background: rgba(125, 179, 255, .24); }
+    .btn.block { width: 100%; }
+    .btn.small { min-height: 32px; padding: 0 var(--s3); font-size: 12px; }
+    #btn-aside { height: 32px; min-height: 32px; }
+    .app.aside-open #btn-aside { background: var(--accent-soft); border-color: rgba(125, 179, 255, .45); color: #cfe3ff; }
+
+    /* ───────── Navigation drawer ───────── */
+    .sidebar {
+      position: fixed; top: var(--header); left: 0; bottom: 0;
+      width: min(var(--sidebar), calc(100vw - 28px));
+      background: var(--panel); border-right: 1px solid var(--line-strong);
+      box-shadow: 24px 0 60px rgba(0, 0, 0, .7);
+      display: flex; flex-direction: column; min-height: 0; z-index: 30;
+      transform: translateX(-105%); visibility: hidden;
+      transition: transform .22s ease, visibility .22s ease;
+    }
+    .app.nav-open .sidebar { transform: none; visibility: visible; }
+    .nav-backdrop {
+      position: fixed; inset: var(--header) 0 0; background: rgba(0, 0, 0, .6); z-index: 29;
+      opacity: 0; visibility: hidden; transition: opacity .22s ease, visibility .22s ease;
+    }
+    .app.nav-open .nav-backdrop { opacity: 1; visibility: visible; }
+    .brand { display: flex; align-items: center; gap: var(--s3); padding: var(--s5); border-bottom: 1px solid var(--line); }
+    .brand-copy { flex: 1; min-width: 0; }
+    .brand-copy strong { display: block; font-size: 13px; font-weight: 600; letter-spacing: .04em; line-height: 1.3; }
+    .brand-copy span { font-size: 12px; color: var(--faint); }
+    .drawer-close { width: 32px; height: 32px; border-radius: var(--r-sm); background: transparent; border: 1px solid var(--line-strong); color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; }
+    .drawer-close:hover { background: var(--raised-2); color: var(--text); }
+    nav { flex: 1; min-height: 0; overflow: auto; padding: var(--s3); display: grid; gap: var(--s1); align-content: start; }
+    .nav-btn {
+      display: flex; align-items: center; gap: var(--s3); width: 100%;
+      min-height: 44px; padding: 0 var(--s3); border: 0; border-radius: var(--r-sm);
+      background: transparent; color: var(--muted); text-align: left; cursor: pointer;
+      position: relative; transition: background .15s, color .15s;
+    }
+    .nav-btn svg { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none; }
+    .nav-btn:hover { background: var(--raised); color: var(--text); }
+    .nav-btn.active { background: var(--accent-soft); color: var(--text); }
+    .nav-btn.active::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 3px; background: var(--accent); }
+    .side-foot { border-top: 1px solid var(--line); padding: var(--s4) var(--s5); display: grid; gap: var(--s2); font-size: 12px; }
+    .side-foot div { display: flex; justify-content: space-between; gap: var(--s3); }
+    .side-foot .k { color: var(--faint); }
+
+    /* ───────── Stage: globe + floating metrics ───────── */
+    .stage { grid-area: stage; position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--space); }
+    #canvas-wrap { position: absolute; inset: 0; background: var(--space); }
+    #canvas-container, #canvas-container canvas { width: 100%; height: 100%; display: block; }
+    .metrics {
+      position: relative; z-index: 2; pointer-events: none;
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: var(--s3); padding: var(--s4) var(--s5) 0;
+    }
+    .metric {
+      pointer-events: auto; min-width: 0;
+      display: flex; flex-direction: column; gap: var(--s1);
+      padding: var(--s3) var(--s4);
+      background: rgba(5, 7, 10, .78); border: 1px solid var(--line);
+      border-radius: var(--r); backdrop-filter: blur(10px);
+    }
+    .metric .lbl { font-size: 12px; color: var(--muted); }
+    .metric .val { font-family: "IBM Plex Mono", monospace; font-size: 22px; font-weight: 500; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .metric .hint { font-size: 12px; color: var(--faint); line-height: 1.35; }
+    .metric.warn .val { color: var(--amber); }
+    .metric.bad .val { color: var(--red); }
+    .viz-hint {
+      position: absolute; left: var(--s5); bottom: var(--s4); z-index: 2; pointer-events: none;
+      font-size: 12px; color: var(--muted);
+      padding: var(--s2) var(--s3); border-radius: var(--r-sm);
+      background: rgba(5, 7, 10, .72); border: 1px solid var(--line);
+    }
+
+    /* ───────── Details panel (docked) ───────── */
+    .aside {
+      grid-area: aside; display: none; flex-direction: column; min-width: 0; min-height: 0;
+      background: var(--panel); border-left: 1px solid var(--line-strong); z-index: 26;
+    }
+    .app.aside-open .aside { display: flex; animation: asideIn .22s ease; }
+    @keyframes asideIn { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+    .aside-head {
+      flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+      padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line);
+    }
+    .tabs { display: flex; gap: var(--s1); padding: var(--s1); background: var(--space); border: 1px solid var(--line); border-radius: 10px; }
+    .tab {
+      display: inline-flex; align-items: center; gap: var(--s2); height: 32px; padding: 0 var(--s3);
+      border: 0; border-radius: 7px; background: transparent; color: var(--muted);
+      font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;
+    }
+    .tab:hover { color: var(--text); }
+    .tab[aria-selected="true"] { background: var(--raised-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
+    .tab .pip { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); display: none; }
+    .tab.has-target .pip { display: inline-block; }
+    .aside-close { width: 36px; height: 36px; border-radius: var(--r-sm); background: var(--raised); border: 1px solid var(--line-strong); font-size: 20px; line-height: 1; cursor: pointer; }
+    .aside-close:hover { background: var(--raised-2); }
+    .pane { flex: 1; min-height: 0; overflow-y: auto; padding: var(--s5); scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+    .pane::-webkit-scrollbar { width: 8px; }
+    .pane::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 8px; }
+    .section { display: none; }
+    .section.active { display: block; }
+    .sec-head { margin-bottom: var(--s5); }
+    .sec-head h2 { font-size: 18px; font-weight: 600; letter-spacing: -.01em; margin-bottom: var(--s1); }
+    .note { font-size: 13px; color: var(--muted); line-height: 1.55; }
+    .stack { display: grid; gap: var(--s3); }
+    .empty { color: var(--muted); font-size: 13px; line-height: 1.55; }
+
+    /* Cards */
+    .card {
+      display: grid; gap: var(--s4); padding: var(--s4);
+      background: var(--raised); border: 1px solid var(--line); border-left: 3px solid var(--line-strong);
+      border-radius: var(--r);
+    }
+    .card.clickable { cursor: pointer; transition: background .15s, border-color .15s; }
+    .card.clickable:hover { background: var(--raised-2); }
+    .card.selected { background: var(--raised-2); border-color: var(--line-strong); box-shadow: inset 0 0 0 1px rgba(125, 179, 255, .35); }
+    .card.risk-close { border-left-color: var(--red); }
+    .card.risk-elevated { border-left-color: var(--amber); }
+    .card.risk-watch { border-left-color: #4a5a72; }
+    .card-top { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+    .card-top .push { margin-left: auto; }
+    .chip {
+      display: inline-flex; align-items: center; height: 24px; padding: 0 var(--s2);
+      border-radius: 6px; font-size: 12px; color: var(--muted);
+      background: var(--space); border: 1px solid var(--line-strong); white-space: nowrap;
+    }
+    .chip.sim { color: var(--amber); background: var(--amber-soft); border-color: rgba(224, 169, 59, .35); }
+    .badge { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 var(--s2); border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+    .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .badge.close { color: var(--red); background: var(--red-soft); }
+    .badge.elevated { color: var(--amber); background: var(--amber-soft); }
+    .badge.watch { color: var(--muted); background: rgba(155, 167, 183, .12); }
+    .pair { display: grid; gap: var(--s2); }
+    .pair-name { display: flex; align-items: center; gap: var(--s3); font-size: 15px; font-weight: 500; line-height: 1.3; overflow-wrap: anywhere; }
+    .pdot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: #e7edf5; box-shadow: 0 0 8px rgba(231, 237, 245, .5); }
+    .pdot.debris { background: #c9b48c; box-shadow: 0 0 8px rgba(201, 180, 140, .5); }
+    .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s2); }
+    .stats > div { padding: var(--s3); background: var(--space); border: 1px solid var(--line); border-radius: var(--r-sm); min-width: 0; }
+    .stats dt { font-size: 12px; color: var(--faint); margin-bottom: var(--s1); white-space: nowrap; }
+    .stats dd { font-family: "IBM Plex Mono", monospace; font-size: 14px; line-height: 1.3; white-space: nowrap; }
+    .stats dd small { display: block; font-size: 11px; color: var(--muted); }
+    .card-title { font-size: 15px; font-weight: 500; }
+    .card-text { font-size: 13px; color: var(--muted); line-height: 1.55; }
+    .card-time { font-size: 12px; color: var(--faint); }
+
+    /* Compact object rows */
+    .obj-row {
+      display: flex; align-items: center; gap: var(--s3); width: 100%; text-align: left;
+      padding: var(--s3) var(--s4); background: var(--raised); border: 1px solid var(--line);
+      border-radius: var(--r-sm); cursor: pointer;
+    }
+    .obj-row:hover { background: var(--raised-2); }
+    .obj-row.selected { box-shadow: inset 0 0 0 1px rgba(125, 179, 255, .45); background: var(--raised-2); }
+    .obj-main { flex: 1; min-width: 0; }
+    .obj-name { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .obj-sub { font-size: 12px; color: var(--faint); }
+    .obj-alt { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--muted); white-space: nowrap; }
+
+    /* Summary */
+    .summary { list-style: none; display: grid; gap: var(--s3); }
+    .summary li {
+      padding: var(--s3) var(--s4); background: var(--raised); border: 1px solid var(--line);
+      border-radius: var(--r-sm); font-size: 13px; color: var(--muted); line-height: 1.55;
+    }
+
+    /* Key-value lists */
+    .group { background: var(--raised); border: 1px solid var(--line); border-radius: var(--r); padding: var(--s1) var(--s4); margin-bottom: var(--s4); }
+    .group-title { font-size: 12px; font-weight: 600; color: var(--faint); letter-spacing: .06em; text-transform: uppercase; padding: var(--s3) 0 var(--s1); }
+    .kv { display: grid; }
+    .kv > div { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s4); padding: var(--s3) 0; border-bottom: 1px solid var(--line); }
+    .kv > div:last-child { border-bottom: 0; }
+    .kv dt { color: var(--muted); font-size: 13px; flex: none; }
+    .kv dd { font-size: 13px; text-align: right; overflow-wrap: anywhere; min-width: 0; white-space: pre-line; }
+    .kv dd.mono { font-size: 13px; }
+    .kv > div.wide { flex-direction: column; align-items: stretch; gap: var(--s1); }
+    .kv > div.wide dd { text-align: left; }
+
+    /* Target pane */
+    .target-head { display: grid; gap: var(--s2); margin-bottom: var(--s5); }
+    .target-head h2 { font-size: 20px; font-weight: 600; letter-spacing: -.01em; overflow-wrap: anywhere; }
+    .target-empty { display: grid; justify-items: center; text-align: center; gap: var(--s3); padding: 56px var(--s5); border: 1px dashed var(--line-strong); border-radius: var(--r); }
+    .target-empty svg { width: 36px; height: 36px; stroke: var(--faint); fill: none; stroke-width: 1.4; }
+
+    /* Weather */
+    .weather-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s3); margin-bottom: var(--s4); }
+    .stat { padding: var(--s3) var(--s4); background: var(--raised); border: 1px solid var(--line); border-radius: var(--r-sm); min-width: 0; }
+    .stat .lbl { font-size: 12px; color: var(--faint); margin-bottom: 2px; }
+    .stat .val { font-size: 15px; overflow-wrap: anywhere; }
+    #flux-chart { width: 100%; height: auto; aspect-ratio: 520 / 144; display: block; border: 1px solid var(--line); border-radius: var(--r-sm); margin-bottom: var(--s3); }
+
+    /* Forms */
+    .form { display: grid; gap: var(--s4); margin-bottom: var(--s5); }
+    .field { display: grid; gap: var(--s2); }
+    .field label { font-size: 13px; color: var(--muted); }
+    .control {
+      width: 100%; height: 42px; padding: 0 var(--s3);
+      background: var(--space); border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+    }
+    .control:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+    .input-unit { position: relative; }
+    .input-unit .control { padding-right: 48px; }
+    .input-unit span { position: absolute; right: var(--s3); top: 50%; transform: translateY(-50%); font-size: 13px; color: var(--faint); pointer-events: none; }
+    .scan-status { margin-bottom: var(--s3); }
+    .table-wrap { border: 1px solid var(--line); border-radius: var(--r-sm); overflow-x: auto; }
+    .scan-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .scan-table th { text-align: left; font-weight: 500; font-size: 12px; color: var(--faint); padding: var(--s3); background: var(--raised); border-bottom: 1px solid var(--line-strong); white-space: nowrap; }
+    .scan-table td { padding: var(--s3); border-bottom: 1px solid var(--line); }
+    .scan-table tr:last-child td { border-bottom: 0; }
+    .scan-table .num { text-align: right; font-family: "IBM Plex Mono", monospace; white-space: nowrap; }
+    .sim-banner { padding: var(--s3) var(--s4); border: 1px solid rgba(224, 169, 59, .35); background: var(--amber-soft); color: #f0cd85; border-radius: var(--r-sm); font-size: 13px; line-height: 1.6; }
+    .sim-banner b { display: block; margin-bottom: var(--s1); }
+    .action-row { display: grid; gap: var(--s4); margin-top: var(--s4); }
+
+    /* ───────── Bottom controls ───────── */
+    .dock {
+      grid-area: dock; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+      gap: var(--s4) var(--s6); padding: var(--s4) var(--s5);
+      background: var(--space); border-top: 1px solid var(--line); min-width: 0; z-index: 20;
+    }
+    .time-ctl { flex: 1 1 320px; max-width: 520px; display: grid; gap: var(--s2); }
+    .time-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; color: var(--muted); }
+    .time-head b { color: var(--text); font-weight: 500; font-size: 14px; }
+    input[type=range] {
+      -webkit-appearance: none; appearance: none; width: 100%; height: 20px; background: transparent; cursor: pointer;
+      --pct: 0%;
+    }
+    input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; background: linear-gradient(90deg, var(--accent) var(--pct), var(--line-strong) var(--pct)); }
+    input[type=range]::-moz-range-track { height: 4px; border-radius: 4px; background: var(--line-strong); }
+    input[type=range]::-moz-range-progress { height: 4px; border-radius: 4px; background: var(--accent); }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; margin-top: -7px; border-radius: 50%; background: #fff; border: 3px solid var(--accent); }
+    input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 3px solid var(--accent); }
+    .toggles { display: flex; flex-wrap: wrap; gap: var(--s2); }
+    .toggle {
+      display: inline-flex; align-items: center; gap: var(--s2); height: 36px; padding: 0 var(--s3);
+      border: 1px solid var(--line-strong); border-radius: 999px; background: var(--raised);
+      font-size: 13px; color: var(--muted); cursor: pointer; user-select: none; transition: background .15s, color .15s, border-color .15s;
+    }
+    .toggle:hover { color: var(--text); }
+    .toggle:has(input:checked) { color: var(--text); background: var(--accent-soft); border-color: rgba(125, 179, 255, .45); }
+    .toggle input {
+      -webkit-appearance: none; appearance: none; width: 16px; height: 16px; margin: 0; flex: none;
+      border: 1.5px solid var(--faint); border-radius: 5px; background: transparent; display: grid; place-content: center; cursor: pointer;
+    }
+    .toggle input:checked { background: var(--accent); border-color: var(--accent); }
+    .toggle input:checked::after { content: ""; width: 8px; height: 4px; border-left: 2px solid #04101f; border-bottom: 2px solid #04101f; transform: rotate(-45deg) translate(1px, -1px); }
+
+    /* ───────── Modal ───────── */
+    #modal-planner { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; padding: var(--s4); background: rgba(0, 0, 0, .78); backdrop-filter: blur(4px); }
+    #modal-planner.open { display: flex; }
+    .modal { width: min(600px, 100%); max-height: 100%; overflow: auto; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 16px; padding: var(--s6); display: grid; gap: var(--s5); box-shadow: 0 30px 80px rgba(0, 0, 0, .8); }
+    .modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--s4); }
+    .modal-head h2 { font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
+    .modal-head p { font-size: 13px; color: var(--muted); margin-top: var(--s1); }
+    .modal-head p b { color: var(--text); font-weight: 500; }
+    .strategies { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4); }
+    .strategy-card { display: grid; gap: var(--s3); align-content: start; padding: var(--s4); background: var(--raised); border: 1px solid var(--line); border-radius: var(--r); }
+    .strategy-card h3 { font-size: 14px; font-weight: 500; color: var(--muted); }
+    .strategy-card .offset { font-family: "IBM Plex Mono", monospace; font-size: 26px; font-weight: 500; line-height: 1.1; }
+    .strategy-card .offset small { font-size: 13px; color: var(--muted); margin-left: 4px; }
+    .strategy-card p { font-size: 13px; color: var(--muted); }
+    .strategy-card .btn { margin-top: var(--s2); }
+
+    /* ───────── Responsive ───────── */
+    @media (max-width: 1440px) { :root { --aside: 390px; } }
+    /* Below 1280px the details panel floats over the globe instead of docking, so the metric cards never wrap. */
+    @media (max-width: 1279px) {
+      .app.aside-open { grid-template-columns: minmax(0, 1fr); grid-template-areas: "header" "stage" "dock"; }
+      .aside { position: fixed; top: var(--header); right: 0; bottom: 0; width: min(420px, 100vw); box-shadow: -24px 0 60px rgba(0, 0, 0, .75); }
+    }
+    @media (max-width: 1000px) {
+      .metrics { grid-auto-flow: column; grid-template-columns: none; grid-auto-columns: minmax(170px, 1fr); overflow-x: auto; pointer-events: auto; scrollbar-width: none; }
+      .metrics::-webkit-scrollbar { display: none; }
+    }
+    @media (max-width: 900px) {
+      :root { --header: 60px; }
+      header { padding: 0 var(--s4); gap: var(--s3); }
+      .metrics { padding: var(--s3) var(--s4) 0; }
+      .viz-hint { left: var(--s4); bottom: var(--s3); }
+      .dock { padding: var(--s3) var(--s4); gap: var(--s3); }
+      .time-ctl { flex-basis: 100%; max-width: none; }
+    }
+    @media (max-width: 560px) {
+      header { gap: var(--s2); padding: 0 var(--s3); }
+      .header-brand { gap: var(--s2); min-width: 0; flex: 1 1 auto; }
+      .header-mark { width: 24px; height: 24px; }
+      .header-name { font-size: 15px; overflow: hidden; text-overflow: ellipsis; }
+      .header-meta { gap: var(--s2); margin-left: 0; flex: none; }
+      .time-pill { display: none; }
+      .status-pill { padding: 0; width: 32px; justify-content: center; }
+      .status-pill #hdr-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+      .stats > div { padding: var(--s2) var(--s3); }
+      .strategies { grid-template-columns: 1fr; }
+      .modal { padding: var(--s5); }
+      .viz-hint { display: none; }
+      .toggle { height: 34px; padding: 0 var(--s3); font-size: 12px; }
+      .pane { padding: var(--s4); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .sidebar, .nav-backdrop { transition: none !important; }
+      .app.aside-open .aside { animation: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+    <header>
+      <button class="icon-btn" id="btn-nav" type="button" aria-label="Open dashboard navigation" aria-expanded="false">
+        <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <div class="header-brand" aria-label="Orbital Risk Engine">
+        <svg class="header-mark" viewBox="0 0 32 32" role="img" aria-label="Orbital logo">
+          <g fill="none" stroke="#D9E1EC" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round">
+            <ellipse cx="15.5" cy="16" rx="13" ry="6.1" transform="rotate(-28 15.5 16)"/>
+          </g>
+          <circle cx="23.9" cy="8.7" r="2.4" fill="#E7EDF5"/>
+        </svg>
+        <span class="header-name">Orbital Risk Engine</span>
+      </div>
+      <div class="header-meta">
+        <span class="status-pill"><i class="dot" id="hdr-dot"></i><span id="hdr-status">Backend unchecked</span></span>
+        <span class="time-pill mono" id="hdr-time">T+0.0 h</span>
+        <button class="btn small" id="btn-aside" type="button" aria-expanded="false" aria-controls="aside">Details</button>
+      </div>
+    </header>
+
+    <div class="nav-backdrop" id="nav-backdrop" aria-hidden="true"></div>
+    <aside class="sidebar" aria-label="Dashboard navigation">
+      <div class="brand">
+        <svg width="26" height="26" viewBox="0 0 32 32" fill="none" stroke="#9ba7b7" stroke-width="1.2" aria-hidden="true">
+          <circle cx="16" cy="16" r="5"/>
+          <ellipse cx="16" cy="16" rx="13" ry="5.5" transform="rotate(-22 16 16)"/>
+          <circle cx="27" cy="11" r="1.4" fill="#e8edf4" stroke="none"/>
+        </svg>
+        <div class="brand-copy">
+          <strong>SPACE TRAFFIC RISK ENGINE</strong>
+          <span>Mission operations</span>
+        </div>
+        <button class="drawer-close" id="btn-close-nav" type="button" aria-label="Close navigation">×</button>
+      </div>
+      <nav>
+        <button class="nav-btn active" data-section="overview">
+          <svg viewBox="0 0 24 24" stroke-width="1.6"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          Overview
+        </button>
+        <button class="nav-btn" data-section="conjunctions">
+          <svg viewBox="0 0 24 24" stroke-width="1.6"><circle cx="8" cy="12" r="3"/><circle cx="16" cy="12" r="3"/></svg>
+          Active conjunctions
+        </button>
+        <button class="nav-btn" data-section="alerts">
+          <svg viewBox="0 0 24 24" stroke-width="1.6"><path d="M12 3l9 18H3L12 3z"/><path d="M12 10v4"/><path d="M12 17h.01"/></svg>
+          Risk alerts
+        </button>
+        <button class="nav-btn" data-section="weather">
+          <svg viewBox="0 0 24 24" stroke-width="1.6"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M5 19l1.5-1.5"/></svg>
+          Space weather
+        </button>
+        <button class="nav-btn" data-section="objects">
+          <svg viewBox="0 0 24 24" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg>
+          Tracked objects
+        </button>
+        <button class="nav-btn" data-section="debris">
+          <svg viewBox="0 0 24 24" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M8 8l3 2-1 4 4 2M15 6l-1 3 3 2"/></svg>
+          Debris proximity scanner
+        </button>
+        <button class="nav-btn" data-section="timeline">
+          <svg viewBox="0 0 24 24" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 8v5l3 2"/></svg>
+          Orbit timeline
+        </button>
+        <button class="nav-btn" data-section="maneuver">
+          <svg viewBox="0 0 24 24" stroke-width="1.6"><path d="M5 19L19 5"/><path d="M9 5h10v10"/></svg>
+          Maneuver simulation
+        </button>
+        <button class="nav-btn" data-section="status">
+          <svg viewBox="0 0 24 24" stroke-width="1.6"><path d="M12 3a9 9 0 100 18 9 9 0 000-18z"/><path d="M8 12l2.5 2.5L16 9"/></svg>
+          System status
+        </button>
+      </nav>
+      <div class="side-foot">
+        <div><span class="k">Backend</span> <span id="foot-backend">Unchecked</span></div>
+        <div><span class="k">Last refresh</span> <span class="mono" id="foot-refresh">Unavailable</span></div>
+        <div><span class="k">Tracked objects</span> <span class="mono" id="foot-count">Unavailable</span></div>
+      </div>
+    </aside>
+
+    <main class="stage">
+      <div id="canvas-wrap">
+        <div id="canvas-container"></div>
+      </div>
+      <div class="metrics" id="metrics">
+        <article class="metric"><div class="lbl">Active conjunctions</div><div class="val" id="m-conj">—</div><div class="hint" id="m-conj-h">Awaiting backend</div></article>
+        <article class="metric" id="m-alert-card"><div class="lbl">Risk alerts</div><div class="val" id="m-alert">—</div><div class="hint" id="m-alert-h">Derived from live feed</div></article>
+        <article class="metric"><div class="lbl">Space weather</div><div class="val" id="m-wx">—</div><div class="hint" id="m-wx-h">F10.7 solar radio flux</div></article>
+        <article class="metric"><div class="lbl">Tracked objects</div><div class="val" id="m-obj">—</div><div class="hint" id="m-obj-h">Catalog objects in view</div></article>
+        <article class="metric" id="m-sys-card"><div class="lbl">System status</div><div class="val" id="m-sys">—</div><div class="hint" id="m-sys-h">API health</div></article>
+      </div>
+      <div class="viz-hint">Drag to rotate · scroll to zoom · click a marker to inspect</div>
+    </main>
+
+    <aside class="aside" id="aside" aria-label="Details panel">
+      <div class="aside-head">
+        <div class="tabs" role="tablist">
+          <button class="tab" id="tab-details" role="tab" aria-selected="true" data-pane="section" type="button">Mission details</button>
+          <button class="tab" id="tab-target" role="tab" aria-selected="false" data-pane="target" type="button">Target lock<i class="pip"></i></button>
+        </div>
+        <button class="aside-close" id="btn-close-aside" type="button" aria-label="Close details panel" title="Close details">×</button>
+      </div>
+
+      <div class="pane" id="pane-section" role="tabpanel" aria-labelledby="tab-details">
+        <section class="section active" id="sec-overview">
+          <div class="sec-head"><h2>Operational summary</h2><p class="note">A snapshot of the current feed.</p></div>
+          <ul class="summary" id="summary-list">
+            <li>Waiting for the first conjunction-feed response.</li>
+          </ul>
+        </section>
+
+        <section class="section" id="sec-conjunctions">
+          <div class="sec-head"><h2>Active conjunctions</h2><p class="note" id="conj-note">Ranked by computed miss distance from current state vectors. Collision probability is not provided by the backend.</p></div>
+          <div class="stack" id="conj-list">Loading…</div>
+        </section>
+
+        <section class="section" id="sec-alerts">
+          <div class="sec-head"><h2>Risk alerts</h2><p class="note">Only conditions supported by the current feed, computed miss distances, or simulation results.</p></div>
+          <div class="stack" id="alert-list">None yet.</div>
+        </section>
+
+        <section class="section" id="sec-weather">
+          <div class="sec-head"><h2>Space weather</h2><p class="note">Solar radio flux affects atmospheric drag on low orbits.</p></div>
+          <div class="weather-grid">
+            <div class="stat"><div class="lbl">F10.7 flux</div><div class="val mono" id="wx-f107">—</div></div>
+            <div class="stat"><div class="lbl">Reported class</div><div class="val" id="wx-class">—</div></div>
+            <div class="stat"><div class="lbl">Drag σ</div><div class="val mono" id="wx-drag">—</div></div>
+            <div class="stat"><div class="lbl">Source</div><div class="val" id="wx-src">—</div></div>
+          </div>
+          <canvas id="flux-chart" width="520" height="144" aria-label="Session F10.7 samples"></canvas>
+          <p class="note" id="wx-chart-note">Chart shows F10.7 values received during this session only.</p>
+        </section>
+
+        <section class="section" id="sec-objects">
+          <div class="sec-head"><h2>Tracked objects</h2><p class="note" id="obj-note">From the latest catalog snapshot.</p></div>
+          <div class="stack" id="obj-list">Loading…</div>
+        </section>
+
+        <section class="section" id="sec-debris">
+          <div class="sec-head"><h2>Debris proximity scanner</h2><p class="note">Screens catalogued debris against the selected object's current position. A radius match means proximity only, not a confirmed collision or a collision probability.</p></div>
+          <div class="form">
+            <div class="field"><label for="debris-target">Target satellite</label><select class="control" id="debris-target"></select></div>
+            <div class="field"><label for="debris-radius">Screening radius</label><div class="input-unit"><input class="control" id="debris-radius" type="number" min="1" max="100000" step="10" value="100"><span>km</span></div></div>
+            <button class="btn primary block" id="btn-debris-scan" type="button">Scan radius</button>
+          </div>
+          <div id="debris-scan-status" class="note scan-status">Waiting for catalog data.</div>
+          <div id="debris-scan-results">No scan run yet.</div>
+        </section>
+
+        <section class="section" id="sec-timeline">
+          <div class="sec-head"><h2>Orbit timeline</h2><p class="note">Use the time slider below the globe to inspect the backend's orbital states.</p></div>
+          <dl class="group kv"><div><dt>Current offset</dt><dd class="mono" id="tl-note">T+0.0 h</dd></div></dl>
+        </section>
+
+        <section class="section" id="sec-maneuver">
+          <div class="sec-head"><h2>Maneuver simulation</h2><p class="note">Select a conjunction, then simulate an avoidance offset of 2,500 km or 5,000 km. The backend applies it on the next conjunction query. Simulated geometry is labeled separately from catalog-tracked states.</p></div>
+          <div class="action-row">
+            <div id="maneuver-result" class="note">No simulation has been executed in this session.</div>
+            <button class="btn primary block" id="btn-open-planner" type="button">Simulate avoidance maneuver</button>
+          </div>
+        </section>
+
+        <section class="section" id="sec-status">
+          <div class="sec-head"><h2>System status</h2><p class="note">Health of the conjunction feed and current view settings.</p></div>
+          <dl class="group kv">
+            <div><dt>Backend</dt><dd id="st-back">Unchecked</dd></div>
+            <div><dt>Last payload</dt><dd class="mono" id="st-time">Unavailable</dd></div>
+            <div><dt>Objects</dt><dd class="mono" id="st-obj">Unavailable</dd></div>
+            <div><dt>Pair records</dt><dd class="mono" id="st-pairs">Unavailable</dd></div>
+            <div><dt>Time offset</dt><dd class="mono" id="st-off">T+0.0 h</dd></div>
+            <div><dt>Flux override</dt><dd id="st-flux">Not applied (using API value)</dd></div>
+          </dl>
+          <button class="btn block" id="btn-debrief" type="button">Voice status readout</button>
+        </section>
+      </div>
+
+      <div class="pane" id="pane-target" role="tabpanel" aria-labelledby="tab-target" hidden>
+        <div id="lock-empty" class="target-empty">
+          <svg viewBox="0 0 24 24" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+          <p class="empty">Select a satellite or debris marker on the globe to load telemetry from the current state vectors.</p>
+        </div>
+        <div id="lock-data" hidden>
+          <div class="target-head">
+            <div><span class="chip" id="insp-type">—</span></div>
+            <h2 id="insp-name">—</h2>
+            <span class="note">NORAD / ID <span class="mono" id="insp-id">—</span></span>
+          </div>
+          <div class="group">
+            <div class="group-title">Orbit</div>
+            <dl class="kv">
+              <div><dt>Altitude</dt><dd class="mono" id="insp-alt">—</dd></div>
+              <div><dt>Inclination</dt><dd class="mono" id="insp-inc">—</dd></div>
+              <div><dt>Period</dt><dd class="mono" id="insp-period">—</dd></div>
+              <div><dt>Speed</dt><dd class="mono" id="insp-speed">—</dd></div>
+              <div><dt>J2 nodal</dt><dd class="mono" id="insp-j2">—</dd></div>
+            </dl>
+          </div>
+          <div class="group">
+            <div class="group-title">Position (ECI)</div>
+            <dl class="kv">
+              <div><dt>X</dt><dd class="mono" id="insp-x">—</dd></div>
+              <div><dt>Y</dt><dd class="mono" id="insp-y">—</dd></div>
+              <div><dt>Z</dt><dd class="mono" id="insp-z">—</dd></div>
+            </dl>
+          </div>
+          <div class="group">
+            <div class="group-title">Status</div>
+            <dl class="kv">
+              <div><dt>Hard-body radius</dt><dd class="mono" id="insp-radius">—</dd></div>
+              <div><dt>Maneuvered</dt><dd id="insp-man">—</dd></div>
+              <div class="wide"><dt>Related events</dt><dd id="insp-conj">—</dd></div>
+              <div><dt>Data age</dt><dd class="mono" id="insp-age">—</dd></div>
+            </dl>
+          </div>
+          <p class="note">Altitude is |r| − Earth radius, inclination comes from r × v, and period from the vis-viva equation.</p>
+        </div>
+      </div>
+    </aside>
+
+    <div class="dock">
+      <div class="time-ctl">
+        <div class="time-head"><label for="timeSlider">Visualization time offset</label><b class="mono" id="timeVal">T+0.0 h</b></div>
+        <input type="range" id="timeSlider" min="0" max="24" step="0.5" value="0">
+      </div>
+      <div class="toggles" role="group" aria-label="Visualization layers">
+        <label class="toggle"><input type="checkbox" id="tog-orbits" checked> Satellite orbit paths</label>
+        <label class="toggle"><input type="checkbox" id="tog-debris" checked> Space debris</label>
+        <label class="toggle"><input type="checkbox" id="tog-conj" checked> Conjunction indicators</label>
+        <label class="toggle"><input type="checkbox" id="tog-atm" checked> Atmosphere</label>
+      </div>
+      <div hidden>
+        <b id="fluxVal">off</b>
+        <input type="range" id="fluxSlider" min="70" max="350" value="150">
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-planner" role="dialog" aria-modal="true" aria-labelledby="planner-title">
+    <div class="modal">
+      <div class="modal-head">
+        <div>
+          <h2 id="planner-title">Avoidance maneuver simulation</h2>
+          <p>Object: <b id="plan-sat">—</b></p>
+        </div>
+        <button class="aside-close" id="btn-close-planner" type="button" aria-label="Close">×</button>
+      </div>
+      <p class="note">Offsets are the values the backend actually applies (<span class="mono">offset_applied</span>). Fuel figures are not returned by the API and are omitted.</p>
+      <div class="strategies">
+        <div class="strategy-card">
+          <h3>Strategy A · smaller offset</h3>
+          <div class="offset">2,500<small>km</small></div>
+          <p>ECI position offset applied on the next query.</p>
+          <button class="btn primary block" id="btn-exec-a" type="button">Simulate strategy A</button>
+        </div>
+        <div class="strategy-card">
+          <h3>Strategy B · larger offset</h3>
+          <div class="offset">5,000<small>km</small></div>
+          <p>ECI position offset applied on the next query.</p>
+          <button class="btn primary block" id="btn-exec-b" type="button">Simulate strategy B</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const R_EARTH_KM = 6378.137;
+    const MU_EARTH = 398600.4418;
+    const SCALE = 0.00108; // Slight visual separation between orbital markers and the Earth surface.
+
+    let activeTargetSatName = "";
+    let fluxOverride = null;
+    let userTouchedFlux = false;
+    let lastPayload = null;
+    let lastFetchAt = null;
+    let backendOk = null;
+    let lastError = null;
+    let lastManeuver = null;
+    let fluxSamples = [];
+    let evaluatedPairs = [];
+    let alerts = [];
+    let selectedObject = null;
+    let highlightedPair = null;
+    let trackedObjects = [];
+    let conjunctionPairs = [];
+    let fetchTimer = null;
+
+    const REDUCED_MOTION = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    function esc(v) {
+      return String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+    function sentence(s) {
+      const t = String(s || "").toLowerCase();
+      return t.charAt(0).toUpperCase() + t.slice(1);
+    }
+    function fmt(n, d) {
+      return Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+    }
+
+    function speakTacticalAlert(text) {
+      if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 0.98;
+        utterance.pitch = 0.9;
+        window.speechSynthesis.speak(utterance);
+      }
+    }
+
+    const container = document.getElementById("canvas-container");
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000000); // Pure black space.
+
+    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 800);
+    camera.position.set(0, 7, 30); // Pulled back so the whole Earth and its orbits sit in the free area below the metric cards.
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setClearColor(0x000000, 1);
+    container.appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.enablePan = false;
+    controls.minDistance = 10;
+    controls.maxDistance = 70;
+    controls.target.set(0, 0, 0);
+
+    const ambient = new THREE.AmbientLight(0x35445a, 0.72);
+    scene.add(ambient);
+    const sun = new THREE.DirectionalLight(0xfff5e5, 1.38);
+    sun.position.set(18, 8, 12);
+    scene.add(sun);
+
+    // Twinkling starfield: soft glow sprites, per-star phase/speed, diffraction spikes on the brightest.
+    const starUniforms = { uTime: { value: 0 }, uPx: { value: Math.min(window.devicePixelRatio || 1, 2) }, uMotion: { value: REDUCED_MOTION ? 0 : 1 } };
+    function makeStarfield() {
+      const layers = [
+        { count: 4200, size: [2.4, 3.8], tw: [0.15, 0.45] },   // dense faint field
+        { count: 1300, size: [5.0, 8.0], tw: [0.25, 0.55] },   // mid stars
+        { count: 280,  size: [20.0, 42.0], tw: [0.30, 0.60] }   // bright stars with spikes
+      ];
+      const total = layers.reduce((s, l) => s + l.count, 0);
+      const pos = new Float32Array(total * 3), col = new Float32Array(total * 3);
+      const size = new Float32Array(total), phase = new Float32Array(total), speed = new Float32Array(total), tw = new Float32Array(total);
+      const tints = [[0.80, 0.88, 1.00], [1.00, 1.00, 1.00], [1.00, 0.90, 0.76], [0.70, 0.82, 1.00]];
+      let i = 0;
+      layers.forEach((L) => {
+        for (let k = 0; k < L.count; k++, i++) {
+          const r = 110 + Math.random() * 260;
+          const theta = Math.random() * Math.PI * 2;
+          const phi = Math.acos(2 * Math.random() - 1);
+          pos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+          pos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+          pos[i * 3 + 2] = r * Math.cos(phi);
+          const t = tints[Math.floor(Math.random() * tints.length)];
+          const lum = 0.7 + Math.random() * 0.3;
+          col[i * 3] = t[0] * lum; col[i * 3 + 1] = t[1] * lum; col[i * 3 + 2] = t[2] * lum;
+          size[i] = L.size[0] + Math.random() * (L.size[1] - L.size[0]);
+          phase[i] = Math.random() * Math.PI * 2;
+          speed[i] = 0.6 + Math.random() * 2.2;
+          tw[i] = L.tw[0] + Math.random() * (L.tw[1] - L.tw[0]);
+        }
+      });
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute("aColor", new THREE.BufferAttribute(col, 3));
+      geo.setAttribute("aSize", new THREE.BufferAttribute(size, 1));
+      geo.setAttribute("aPhase", new THREE.BufferAttribute(phase, 1));
+      geo.setAttribute("aSpeed", new THREE.BufferAttribute(speed, 1));
+      geo.setAttribute("aTw", new THREE.BufferAttribute(tw, 1));
+      const mat = new THREE.ShaderMaterial({
+        uniforms: starUniforms,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        vertexShader: `
+          attribute vec3 aColor; attribute float aSize; attribute float aPhase; attribute float aSpeed; attribute float aTw;
+          uniform float uTime; uniform float uPx; uniform float uMotion;
+          varying vec3 vColor; varying float vLevel; varying float vSize;
+          void main() {
+            float wave = 0.5 + 0.5 * sin(uTime * aSpeed + aPhase);
+            vLevel = 1.0 - aTw * wave * uMotion;
+            vColor = aColor; vSize = aSize;
+            gl_PointSize = aSize * uPx * (0.9 + 0.2 * vLevel);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }`,
+        fragmentShader: `
+          uniform float uPx;
+          varying vec3 vColor; varying float vLevel; varying float vSize;
+          void main() {
+            vec2 p = gl_PointCoord - 0.5;
+            float d = length(p);
+            if (d > 0.5) discard;
+            float fall = 1.0 - d * 2.0;
+            vec2 px = p * vSize * uPx;                 // offset from star centre in real pixels
+            float core = smoothstep(1.5, 0.0, length(px)) * 1.3;
+            float haloAmt = 0.18 + clamp((vSize - 4.0) / 14.0, 0.0, 1.0) * 0.6;
+            float halo = pow(fall, 3.2) * haloAmt;
+            float spike = 0.0;
+            if (vSize > 14.0) {
+              float sx = smoothstep(1.0, 0.0, abs(px.y)) * pow(fall, 1.6);
+              float sy = smoothstep(1.0, 0.0, abs(px.x)) * pow(fall, 1.6);
+              spike = (sx + sy) * 0.55;
+            }
+            float a = clamp((core + halo + spike) * vLevel, 0.0, 1.0);
+            gl_FragColor = vec4(vColor, a);
+          }`
+      });
+      const stars = new THREE.Points(geo, mat);
+      stars.frustumCulled = false;
+      scene.add(stars);
+      return stars;
+    }
+    const starField = makeStarfield();
+
+    const earthGeo = new THREE.SphereGeometry(6.371, 64, 64);
+    const earthMat = new THREE.MeshPhongMaterial({
+      color: 0xffffff,
+      specular: 0x283b50,
+      shininess: 12
+    });
+    const earth = new THREE.Mesh(earthGeo, earthMat);
+    scene.add(earth);
+
+    const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin("anonymous");
+    const earthUrls = [
+      "https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/textures/planets/earth_atmos_2048.jpg",
+      "https://unpkg.com/three-globe@2.31.0/example/img/earth-blue-marble.jpg"
+    ];
+    function loadEarthTexture(i) {
+      if (i >= earthUrls.length) return;
+      loader.load(
+        earthUrls[i],
+        (tex) => {
+          tex.minFilter = THREE.LinearFilter;
+          earthMat.map = tex;
+          earthMat.color.set(0xffffff);
+          earthMat.needsUpdate = true;
+        },
+        undefined,
+        () => loadEarthTexture(i + 1)
+      );
+    }
+    loadEarthTexture(0);
+
+    const atmosphereGeo = new THREE.SphereGeometry(6.52, 48, 48);
+    const atmosphereMat = new THREE.MeshBasicMaterial({
+      color: 0x6d8eae,
+      transparent: true,
+      opacity: 0.13,
+      side: THREE.BackSide,
+      depthWrite: false
+    });
+    const atmosphereMesh = new THREE.Mesh(atmosphereGeo, atmosphereMat);
+    scene.add(atmosphereMesh);
+
+    const objectsGroup = new THREE.Group();
+    const orbitRingsGroup = new THREE.Group();
+    const linesGroup = new THREE.Group();
+    scene.add(objectsGroup);
+    scene.add(orbitRingsGroup);
+    scene.add(linesGroup);
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.params.Points = { threshold: 0.65 };
+    const mouse = new THREE.Vector2();
+
+    function mag(v) { return Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); }
+    function altitudeKm(pos) { return mag(pos) - R_EARTH_KM; }
+    function inclinationDeg(pos, vel) {
+      const hx = pos[1] * vel[2] - pos[2] * vel[1];
+      const hy = pos[2] * vel[0] - pos[0] * vel[2];
+      const hz = pos[0] * vel[1] - pos[1] * vel[0];
+      const h = Math.sqrt(hx * hx + hy * hy + hz * hz);
+      if (!h) return null;
+      return THREE.MathUtils.radToDeg(Math.acos(Math.min(1, Math.max(-1, hz / h))));
+    }
+    function periodMin(pos, vel) {
+      const r = mag(pos);
+      const v2 = vel[0] * vel[0] + vel[1] * vel[1] + vel[2] * vel[2];
+      const a = 1 / (2 / r - v2 / MU_EARTH);
+      if (!isFinite(a) || a <= 0) return null;
+      return (2 * Math.PI * Math.sqrt((a * a * a) / MU_EARTH)) / 60;
+    }
+    function isDebris(type) { return String(type || "").toLowerCase().indexOf("debris") !== -1; }
+
+    function riskFromDistance(km) {
+      if (km < 25) return { key: "close", label: "Close computed miss" };
+      if (km < 80) return { key: "elevated", label: "Elevated proximity" };
+      return { key: "watch", label: "Screened pair" };
+    }
+
+    function setStatus(ok, message) {
+      backendOk = ok;
+      const dot = document.getElementById("hdr-dot");
+      dot.className = "dot " + (ok === true ? "ok" : ok === false ? "bad" : "");
+      document.getElementById("hdr-status").textContent = message;
+      document.getElementById("foot-backend").textContent = message;
+      document.getElementById("st-back").textContent = message;
+      const sys = document.getElementById("m-sys");
+      const card = document.getElementById("m-sys-card");
+      sys.textContent = ok === true ? "Online" : ok === false ? "Unreachable" : "Unknown";
+      document.getElementById("m-sys-h").textContent = message;
+      card.classList.toggle("bad", ok === false);
+    }
+
+    function scheduleUpdate() {
+      clearTimeout(fetchTimer);
+      fetchTimer = setTimeout(updateSimulation, 280);
+    }
+
+    async function updateSimulation() {
+      const timeVal = document.getElementById("timeSlider").value;
+      document.getElementById("timeVal").textContent = `T+${Number(timeVal).toFixed(1)} h`;
+      document.getElementById("hdr-time").textContent = `T+${Number(timeVal).toFixed(1)} h`;
+      document.getElementById("tl-note").textContent = `T+${Number(timeVal).toFixed(1)} h`;
+      document.getElementById("st-off").textContent = `T+${Number(timeVal).toFixed(1)} h`;
+
+      const params = new URLSearchParams({ time_offset_hours: timeVal });
+      if (userTouchedFlux && fluxOverride != null) {
+        params.set("solar_flux_override", fluxOverride);
+        document.getElementById("fluxVal").textContent = fluxOverride;
+        document.getElementById("st-flux").textContent = `${fluxOverride} sfu (override active)`;
+      } else {
+        document.getElementById("fluxVal").textContent = "off";
+        document.getElementById("st-flux").textContent = "Not applied (using API value)";
+      }
+
+      try {
+        const res = await fetch("/api/conjunctions?" + params.toString());
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        lastPayload = data;
+        lastFetchAt = new Date();
+        lastError = null;
+        setStatus(true, "Connected");
+        applyCatalog(data);
+        document.getElementById("foot-refresh").textContent = lastFetchAt.toISOString().replace("T", " ").slice(0, 19) + " UTC";
+        document.getElementById("st-time").textContent = lastFetchAt.toISOString();
+      } catch (err) {
+        lastError = err;
+        setStatus(false, "Conjunction feed failed");
+        console.error("Simulation error:", err);
+        renderAlerts();
+        renderSummary();
+      }
+    }
+
+    function applyCatalog(data) {
+      const fluxVal = data.f107_index;
+      const normalizedFlux = (Number(fluxVal) - 70) / 280;
+      atmosphereMesh.scale.setScalar(1.0 + Math.max(0, normalizedFlux) * 0.08);
+
+      while (objectsGroup.children.length) objectsGroup.remove(objectsGroup.children[0]);
+      while (orbitRingsGroup.children.length) orbitRingsGroup.remove(orbitRingsGroup.children[0]);
+      trackedObjects = [];
+
+      const showOrbits = document.getElementById("tog-orbits").checked;
+      const showDebris = document.getElementById("tog-debris").checked;
+
+      (data.objects || []).forEach((obj) => {
+        const debris = isDebris(obj.type);
+        if (debris && !showDebris) return;
+        const isSelected = !!(selectedObject && selectedObject.name === obj.name);
+        const geo = new THREE.SphereGeometry(isSelected ? 0.34 : (debris ? 0.27 : 0.25), 16, 16);
+        let color = debris ? 0xb1a187 : 0xe7edf5;
+        if (obj.maneuvered) color = 0xc4b07a;
+        const mat = new THREE.MeshPhongMaterial({
+          color,
+          emissive: color,
+          emissiveIntensity: isSelected ? 0.72 : (debris ? 0.32 : 0.48),
+          shininess: 24
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(obj.pos_eci[0] * SCALE, obj.pos_eci[1] * SCALE, obj.pos_eci[2] * SCALE);
+        const tracker = {
+          id: obj.id,
+          name: obj.name,
+          type: obj.type,
+          radius_m: obj.radius_m,
+          j2_nodal_precession_deg_day: obj.j2_nodal_precession_deg_day,
+          maneuvered: obj.maneuvered,
+          pos: [...obj.pos_eci],
+          vel: [...obj.vel_eci],
+          mesh
+        };
+        mesh.userData = tracker;
+        objectsGroup.add(mesh);
+        trackedObjects.push(tracker);
+
+        if (obj.orbit_ring && obj.orbit_ring.length && (showOrbits || (highlightedPair && (highlightedPair.o1.name === obj.name || highlightedPair.o2.name === obj.name)) || (selectedObject && selectedObject.name === obj.name))) {
+          const ringPoints = obj.orbit_ring.map((p) => new THREE.Vector3(p[0] * SCALE, p[1] * SCALE, p[2] * SCALE));
+          const ringGeo = new THREE.BufferGeometry().setFromPoints(ringPoints);
+          const highlight = selectedObject && selectedObject.name === obj.name;
+          const pairHit = highlightedPair && (highlightedPair.o1.name === obj.name || highlightedPair.o2.name === obj.name);
+          const ringMat = new THREE.LineBasicMaterial({
+            color: highlight || pairHit ? 0xc2d5e8 : (debris ? 0x9c8a6d : 0x829bb5),
+            transparent: true,
+            opacity: highlight || pairHit ? 0.88 : (debris ? 0.48 : 0.40)
+          });
+          orbitRingsGroup.add(new THREE.LineLoop(ringGeo, ringMat));
+        }
+      });
+
+      conjunctionPairs = data.conjunction_pairs || [];
+      populateDebrisTargets();
+      evaluatePairs();
+      drawConjunctionLines();
+      renderHUD();
+      if (selectedObject) {
+        const fresh = trackedObjects.find((o) => o.name === selectedObject.name);
+        if (fresh) {
+          selectedObject = fresh;
+          fillInspector(fresh);
+        }
+      }
+    }
+
+    function populateDebrisTargets() {
+      const select = document.getElementById("debris-target");
+      if (!select || !lastPayload) return;
+      const previous = select.value;
+      const targets = (lastPayload.objects || []).filter((obj) => !isDebris(obj.type));
+      select.replaceChildren();
+      targets.forEach((obj) => {
+        const option = document.createElement("option");
+        option.value = String(obj.id);
+        option.textContent = `${obj.name} (#${obj.id})`;
+        select.appendChild(option);
+      });
+      if (targets.some((obj) => String(obj.id) === previous)) select.value = previous;
+      else if (targets.some((obj) => obj.name === "ISS (ZARYA)")) {
+        const iss = targets.find((obj) => obj.name === "ISS (ZARYA)");
+        select.value = String(iss.id);
+      }
+    }
+
+    function scanDebrisRadius() {
+      const status = document.getElementById("debris-scan-status");
+      const results = document.getElementById("debris-scan-results");
+      if (!lastPayload || !Array.isArray(lastPayload.objects)) {
+        status.textContent = "Catalog data is not available yet. Wait for the backend refresh and try again.";
+        results.textContent = "";
+        return;
+      }
+      const radius = Number(document.getElementById("debris-radius").value);
+      if (!Number.isFinite(radius) || radius <= 0 || radius > 100000) {
+        status.textContent = "Enter a radius greater than 0 and no more than 100,000 km.";
+        results.textContent = "";
+        return;
+      }
+      const targetId = document.getElementById("debris-target").value;
+      const objects = lastPayload.objects;
+      const target = objects.find((obj) => String(obj.id) === targetId);
+      if (!target) {
+        status.textContent = "Choose a valid target satellite.";
+        results.textContent = "";
+        return;
+      }
+      const debris = objects.filter((obj) => isDebris(obj.type));
+      const matches = debris.map((obj) => {
+        const dx = target.pos_eci[0] - obj.pos_eci[0];
+        const dy = target.pos_eci[1] - obj.pos_eci[1];
+        const dz = target.pos_eci[2] - obj.pos_eci[2];
+        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        const dv = [target.vel_eci[0] - obj.vel_eci[0], target.vel_eci[1] - obj.vel_eci[1], target.vel_eci[2] - obj.vel_eci[2]];
+        return { obj, distance, relativeSpeed: mag(dv) };
+      }).filter((item) => Number.isFinite(item.distance) && item.distance <= radius)
+        .sort((a, b) => a.distance - b.distance);
+      status.textContent = `Target: ${target.name} · Radius: ${radius.toLocaleString()} km · Catalogued debris checked: ${debris.length}`;
+      results.replaceChildren();
+      if (!debris.length) {
+        const note = document.createElement("p");
+        note.className = "note";
+        note.textContent = "No catalogued debris objects were returned by the configured data source. This is not proof that the orbital region is debris-free.";
+        results.appendChild(note);
+        return;
+      }
+      if (!matches.length) {
+        const note = document.createElement("p");
+        note.className = "note";
+        note.textContent = `No catalogued debris object is within ${radius.toLocaleString()} km of the target in this position snapshot.`;
+        results.appendChild(note);
+        return;
+      }
+      const wrap = document.createElement("div");
+      wrap.className = "table-wrap";
+      const table = document.createElement("table");
+      table.className = "scan-table";
+      table.innerHTML = "<thead><tr><th>Debris object</th><th class='num'>Distance</th><th class='num'>Rel. speed</th></tr></thead>";
+      const tbody = document.createElement("tbody");
+      matches.forEach(({ obj, distance, relativeSpeed }) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td></td><td class="num">${fmt(distance, 2)} km</td><td class="num">${fmt(relativeSpeed, 3)} km/s</td>`;
+        tr.firstElementChild.textContent = `${obj.name} (#${obj.id})`;
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      wrap.appendChild(table);
+      results.appendChild(wrap);
+    }
+
+    function evaluatePairs() {
+      evaluatedPairs = [];
+      conjunctionPairs.forEach((pair) => {
+        const o1 = trackedObjects.find((o) => o.name === pair.sat1_name);
+        const o2 = trackedObjects.find((o) => o.name === pair.sat2_name);
+        if (!o1 || !o2) return;
+        const dx = o1.pos[0] - o2.pos[0];
+        const dy = o1.pos[1] - o2.pos[1];
+        const dz = o1.pos[2] - o2.pos[2];
+        const distKm = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        const relVel = mag([o1.vel[0] - o2.vel[0], o1.vel[1] - o2.vel[1], o1.vel[2] - o2.vel[2]]);
+        evaluatedPairs.push({ o1, o2, distKm, relVel, event_type: pair.event_type });
+      });
+      evaluatedPairs.sort((a, b) => a.distKm - b.distKm);
+    }
+
+    function drawConjunctionLines() {
+      while (linesGroup.children.length) linesGroup.remove(linesGroup.children[0]);
+      if (!document.getElementById("tog-conj").checked) return;
+      evaluatedPairs.slice(0, 8).forEach((item) => {
+        if (item.distKm > 3500) return;
+        const geo = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(item.o1.pos[0] * SCALE, item.o1.pos[1] * SCALE, item.o1.pos[2] * SCALE),
+          new THREE.Vector3(item.o2.pos[0] * SCALE, item.o2.pos[1] * SCALE, item.o2.pos[2] * SCALE)
+        ]);
+        const close = item.distKm < 80;
+        const mat = new THREE.LineBasicMaterial({
+          color: close ? 0x8a4e4e : 0x4a5560,
+          transparent: true,
+          opacity: close ? 0.55 : 0.28
+        });
+        linesGroup.add(new THREE.Line(geo, mat));
+      });
+    }
+
+    function renderHUD() {
+      const data = lastPayload || {};
+      const objCount = data.active_satellites_count != null ? data.active_satellites_count : trackedObjects.length;
+      const pairCount = conjunctionPairs.length;
+      const closeCount = evaluatedPairs.filter((p) => p.distKm < 80).length;
+
+      document.getElementById("m-conj").textContent = String(pairCount);
+      document.getElementById("m-conj-h").textContent = pairCount
+        ? `${closeCount} under 80 km miss (computed)`
+        : "No pair records in payload";
+      document.getElementById("m-obj").textContent = objCount !== "" ? String(objCount) : "—";
+      document.getElementById("m-obj-h").textContent = `${trackedObjects.length} markers drawn`;
+      document.getElementById("foot-count").textContent = objCount != null ? String(objCount) : "Unavailable";
+      document.getElementById("st-obj").textContent = objCount != null ? String(objCount) : "Unavailable";
+      document.getElementById("st-pairs").textContent = String(pairCount);
+
+      if (data.f107_index != null) {
+        if (!userTouchedFlux) {
+          document.getElementById("fluxSlider").value = Math.min(350, Math.max(70, Number(data.f107_index)));
+        }
+        document.getElementById("m-wx").textContent = Number(data.f107_index).toFixed(1) + " sfu";
+        document.getElementById("m-wx-h").textContent = data.solar_flare_class
+          ? `Reported class: ${data.solar_flare_class}`
+          : "F10.7 from conjunction API";
+        document.getElementById("wx-f107").textContent = Number(data.f107_index).toFixed(1) + " sfu";
+        document.getElementById("wx-class").textContent = data.solar_flare_class || "Unavailable";
+        document.getElementById("wx-drag").textContent = data.drag_covariance_sigma_km != null
+          ? data.drag_covariance_sigma_km + " km"
+          : "Unavailable";
+        document.getElementById("wx-src").textContent = userTouchedFlux
+          ? "Slider override"
+          : "Conjunction API";
+        fluxSamples.push({ t: Date.now(), v: Number(data.f107_index) });
+        if (fluxSamples.length > 40) fluxSamples.shift();
+        drawFluxChart();
+      } else {
+        document.getElementById("m-wx").textContent = "Unavailable";
+      }
+
+      renderConjunctions();
+      renderObjects();
+      renderAlerts();
+      renderSummary();
+    }
+
+    function renderConjunctions() {
+      const list = document.getElementById("conj-list");
+      list.innerHTML = "";
+      const top = evaluatedPairs.slice(0, 20);
+      document.getElementById("conj-note").textContent =
+        `Showing ${top.length} closest events from ${conjunctionPairs.length} pair records.`;
+      if (!top.length) {
+        list.textContent = "No evaluable conjunction pairs in the current snapshot.";
+        return;
+      }
+      top.forEach((item) => {
+        const tcaSec = Math.max(0.1, item.distKm / (item.relVel + 0.001));
+        const risk = riskFromDistance(item.distKm);
+        const mitigated = item.o1.maneuvered || item.o2.maneuvered;
+        const isSel = !!(highlightedPair && highlightedPair.o1.name === item.o1.name && highlightedPair.o2.name === item.o2.name);
+        const row = document.createElement("article");
+        row.className = "card clickable risk-" + risk.key + (isSel ? " selected" : "");
+        row.tabIndex = 0;
+        row.setAttribute("role", "button");
+        row.innerHTML =
+          `<div class="card-top">` +
+            `<span class="chip">${esc(sentence(item.event_type))}</span>` +
+            (mitigated ? `<span class="chip sim">Simulated offset</span>` : "") +
+            `<span class="badge ${risk.key === "close" ? "close" : risk.key === "elevated" ? "elevated" : "watch"} push">${esc(risk.label)}</span>` +
+          `</div>` +
+          `<div class="pair">` +
+            `<div class="pair-name"><i class="pdot${isDebris(item.o1.type) ? " debris" : ""}"></i><span>${esc(item.o1.name)}</span></div>` +
+            `<div class="pair-name"><i class="pdot${isDebris(item.o2.type) ? " debris" : ""}"></i><span>${esc(item.o2.name)}</span></div>` +
+          `</div>` +
+          `<dl class="stats">` +
+            `<div><dt>Miss</dt><dd>${fmt(item.distKm, 2)}<small>km</small></dd></div>` +
+            `<div><dt>Rel. speed</dt><dd>${fmt(item.relVel, 2)}<small>km/s</small></dd></div>` +
+            `<div><dt>Range/speed</dt><dd>${fmt(tcaSec, 1)}<small>s</small></dd></div>` +
+          `</dl>` +
+          `<button class="btn primary block open-planner-btn" type="button" data-sat="${esc(item.o1.name)}">Simulate avoidance maneuver</button>`;
+        const choose = () => {
+          highlightedPair = item;
+          selectedObject = item.o1;
+          fillInspector(item.o1);
+          applyCatalog(lastPayload);
+          document.getElementById("app").classList.add("aside-open");
+        };
+        row.addEventListener("click", (e) => { if (!e.target.closest("button")) choose(); });
+        row.addEventListener("keydown", (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === row) { e.preventDefault(); choose(); } });
+        list.appendChild(row);
+      });
+      list.querySelectorAll(".open-planner-btn").forEach((btn) => {
+        btn.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openPlanner(btn.getAttribute("data-sat"));
+        };
+      });
+    }
+
+    function renderObjects() {
+      const list = document.getElementById("obj-list");
+      list.innerHTML = "";
+      document.getElementById("obj-note").textContent = `${trackedObjects.length} objects in the current draw set.`;
+      trackedObjects.forEach((obj) => {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "obj-row" + (selectedObject && selectedObject.name === obj.name ? " selected" : "");
+        const alt = altitudeKm(obj.pos);
+        row.innerHTML =
+          `<i class="pdot${isDebris(obj.type) ? " debris" : ""}"></i>` +
+          `<span class="obj-main"><div class="obj-name">${esc(obj.name)}</div><div class="obj-sub">${esc(obj.type)}${obj.maneuvered ? " · simulated offset" : ""}</div></span>` +
+          `<span class="obj-alt">${fmt(alt, 0)} km</span>`;
+        row.onclick = () => {
+          selectedObject = obj;
+          fillInspector(obj);
+          setPane("target");
+          if (lastPayload) applyCatalog(lastPayload);
+        };
+        list.appendChild(row);
+      });
+    }
+
+    function renderAlerts() {
+      alerts = [];
+      if (backendOk === false) {
+        alerts.push({
+          severity: "High",
+          title: "Conjunction feed unavailable",
+          detail: lastError ? String(lastError.message || lastError) : "The last request to /api/conjunctions failed.",
+          time: new Date().toISOString(),
+          action: "status"
+        });
+      }
+      evaluatedPairs.filter((p) => p.distKm < 25).slice(0, 5).forEach((p) => {
+        alerts.push({
+          severity: "High",
+          title: "Close computed approach",
+          detail: `${p.o1.name} and ${p.o2.name} have a Euclidean miss distance of ${p.distKm.toFixed(2)} km. This is not a backend collision probability.`,
+          time: lastFetchAt ? lastFetchAt.toISOString() : "Unavailable",
+          action: "conjunctions",
+          pair: p
+        });
+      });
+      evaluatedPairs.filter((p) => p.distKm >= 25 && p.distKm < 80).slice(0, 5).forEach((p) => {
+        alerts.push({
+          severity: "Elevated",
+          title: "Elevated proximity",
+          detail: `${p.o1.name} / ${p.o2.name}: miss ${p.distKm.toFixed(1)} km at ${p.relVel.toFixed(2)} km/s relative speed.`,
+          time: lastFetchAt ? lastFetchAt.toISOString() : "Unavailable",
+          action: "conjunctions",
+          pair: p
+        });
+      });
+      const cls = (lastPayload && lastPayload.solar_flare_class) || "";
+      if (/X-CLASS|SEVERE|M-CLASS/i.test(cls)) {
+        alerts.push({
+          severity: /X-CLASS|SEVERE/i.test(cls) ? "High" : "Elevated",
+          title: "Space-weather classification",
+          detail: `Backend reported solar_flare_class “${cls}” from F10.7 = ${lastPayload.f107_index} sfu (not an X-ray measurement).`,
+          time: lastFetchAt ? lastFetchAt.toISOString() : "Unavailable",
+          action: "weather"
+        });
+      }
+      if (lastManeuver) {
+        alerts.push({
+          severity: "Info",
+          title: "Simulated avoidance applied",
+          detail: `${lastManeuver.sat_name}: strategy ${lastManeuver.strategy}, offset_applied ${lastManeuver.offset_applied} km (simulated).`,
+          time: lastManeuver.at,
+          action: "maneuver"
+        });
+      }
+
+      document.getElementById("m-alert").textContent = String(alerts.filter((a) => a.severity !== "Info").length);
+      document.getElementById("m-alert-h").textContent = alerts.length ? "From miss distance, weather class, and feed health" : "No alert conditions from current data";
+      const card = document.getElementById("m-alert-card");
+      const high = alerts.some((a) => a.severity === "High");
+      const elev = alerts.some((a) => a.severity === "Elevated");
+      card.classList.toggle("bad", high);
+      card.classList.toggle("warn", !high && elev);
+
+      const list = document.getElementById("alert-list");
+      list.innerHTML = "";
+      if (!alerts.length) {
+        list.innerHTML = "<p class='empty'>No high-priority event reported.</p>";
+        return;
+      }
+      alerts.forEach((a) => {
+        const row = document.createElement("article");
+        const sevKey = a.severity === "High" ? "close" : a.severity === "Elevated" ? "elevated" : "watch";
+        row.className = "card risk-" + sevKey;
+        row.innerHTML =
+          `<div class="card-top"><span class="badge ${sevKey}">${esc(a.severity)}</span><span class="card-time mono push">${esc(a.time)}</span></div>` +
+          `<div><div class="card-title">${esc(a.title)}</div><div class="card-text">${esc(a.detail)}</div></div>` +
+          `<button class="btn block" type="button">Inspect</button>`;
+        row.querySelector("button").onclick = (e) => {
+          e.stopPropagation();
+          showSection(a.action);
+          if (a.pair) {
+            highlightedPair = a.pair;
+            selectedObject = a.pair.o1;
+            fillInspector(a.pair.o1);
+            if (lastPayload) applyCatalog(lastPayload);
+          }
+        };
+        list.appendChild(row);
+      });
+    }
+
+    function renderSummary() {
+      const ul = document.getElementById("summary-list");
+      const data = lastPayload;
+      const items = [];
+      if (!data) {
+        items.push(backendOk === false
+          ? "Orbital traffic: unavailable — conjunction API did not respond."
+          : "Orbital traffic: waiting for the first catalog snapshot.");
+      } else {
+        const close = evaluatedPairs.filter((p) => p.distKm < 80).length;
+        items.push(close
+          ? `Orbital traffic: ${close} pair(s) currently have a computed miss distance under 80 km.`
+          : "Orbital traffic: no pair in the current snapshot has a computed miss distance under 80 km.");
+        items.push(`Active conjunctions: ${conjunctionPairs.length} pair record(s) returned by the backend.`);
+        const top = alerts.find((a) => a.severity === "High") || alerts.find((a) => a.severity === "Elevated");
+        items.push(top ? `Highest-priority event: ${top.title}.` : "Highest-priority event: No high-priority event reported.");
+        items.push(data.f107_index != null
+          ? `Space weather: F10.7 ${Number(data.f107_index).toFixed(1)} sfu; reported class ${data.solar_flare_class || "unavailable"}.`
+          : "Space weather: F10.7 unavailable.");
+        items.push(`Tracked objects: ${data.active_satellites_count != null ? data.active_satellites_count : "unavailable"}.`);
+        items.push(backendOk
+          ? `Data quality: last successful payload at ${lastFetchAt.toISOString()}.`
+          : "Data quality: stale or unavailable.");
+        if (data.time_offset_hours != null) {
+          items.push(`Timeline position: T+${Number(data.time_offset_hours).toFixed(1)} h as reported by the API.`);
+        }
+      }
+      ul.innerHTML = items.map((t) => `<li>${esc(t)}</li>`).join("");
+    }
+
+    function drawFluxChart() {
+      const canvas = document.getElementById("flux-chart");
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width, h = canvas.height;
+      ctx.fillStyle = "#0c1016";
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = "#1a212b";
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 4; i++) {
+        const y = (h / 4) * i;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+      }
+      if (fluxSamples.length < 2) {
+        ctx.fillStyle = "#9ba7b7";
+        ctx.font = "20px IBM Plex Sans, sans-serif";
+        ctx.fillText("Not enough session samples for a trend.", 16, h / 2);
+        return;
+      }
+      const vs = fluxSamples.map((s) => s.v);
+      const min = Math.min(...vs) - 2;
+      const max = Math.max(...vs) + 2;
+      ctx.beginPath();
+      ctx.strokeStyle = "#7db3ff";
+      ctx.lineWidth = 2;
+      fluxSamples.forEach((s, i) => {
+        const x = (i / (fluxSamples.length - 1)) * (w - 16) + 8;
+        const y = h - 12 - ((s.v - min) / (max - min || 1)) * (h - 24);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      ctx.fillStyle = "#9ba7b7";
+      ctx.font = "18px IBM Plex Mono, monospace";
+      ctx.fillText(max.toFixed(0), 8, 16);
+      ctx.fillText(min.toFixed(0), 8, h - 6);
+    }
+
+    function fillInspector(obj) {
+      document.getElementById("lock-empty").hidden = true;
+      document.getElementById("lock-data").hidden = false;
+      document.getElementById("tab-target").classList.add("has-target");
+      document.getElementById("insp-name").textContent = obj.name || "Unavailable";
+      document.getElementById("insp-type").textContent = obj.type || "Unavailable";
+      document.getElementById("insp-id").textContent = obj.id != null ? String(obj.id) : "Unavailable";
+      const alt = altitudeKm(obj.pos);
+      document.getElementById("insp-alt").textContent = isFinite(alt) ? fmt(alt, 1) + " km" : "Unavailable";
+      const inc = inclinationDeg(obj.pos, obj.vel);
+      document.getElementById("insp-inc").textContent = inc != null ? inc.toFixed(2) + "°" : "Unavailable";
+      const per = periodMin(obj.pos, obj.vel);
+      document.getElementById("insp-period").textContent = per != null ? fmt(per, 1) + " min" : "Unavailable";
+      document.getElementById("insp-radius").textContent = obj.radius_m != null ? obj.radius_m + " m" : "Unavailable";
+      document.getElementById("insp-j2").textContent = obj.j2_nodal_precession_deg_day != null ? obj.j2_nodal_precession_deg_day + " °/day" : "Unavailable";
+      document.getElementById("insp-speed").textContent = mag(obj.vel).toFixed(3) + " km/s";
+      document.getElementById("insp-x").textContent = fmt(obj.pos[0], 2) + " km";
+      document.getElementById("insp-y").textContent = fmt(obj.pos[1], 2) + " km";
+      document.getElementById("insp-z").textContent = fmt(obj.pos[2], 2) + " km";
+      document.getElementById("insp-man").textContent = obj.maneuvered ? "Yes (simulated offset)" : "No";
+      const related = evaluatedPairs.filter((p) => p.o1.name === obj.name || p.o2.name === obj.name).slice(0, 3);
+      document.getElementById("insp-conj").textContent = related.length
+        ? related.map((p) => `${p.o1.name === obj.name ? p.o2.name : p.o1.name} (${p.distKm.toFixed(1)}\u00a0km)`).join("\n")
+        : "None in evaluated set";
+      document.getElementById("insp-age").textContent = lastFetchAt ? lastFetchAt.toISOString() : "Unavailable";
+    }
+
+    function setPane(name) {
+      const isTarget = name === "target";
+      document.getElementById("pane-section").hidden = isTarget;
+      document.getElementById("pane-target").hidden = !isTarget;
+      document.getElementById("tab-details").setAttribute("aria-selected", String(!isTarget));
+      document.getElementById("tab-target").setAttribute("aria-selected", String(isTarget));
+      document.getElementById(isTarget ? "pane-target" : "pane-section").scrollTop = 0;
+    }
+    document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => setPane(t.dataset.pane)));
+
+    function showSection(id) {
+      setPane("section");
+      document.querySelectorAll(".section").forEach((el) => el.classList.toggle("active", el.id === "sec-" + id));
+      document.querySelectorAll(".nav-btn").forEach((btn) => btn.classList.toggle("active", btn.dataset.section === id));
+      document.getElementById("app").classList.add("aside-open");
+      document.getElementById("app").classList.remove("nav-open");
+      document.getElementById("btn-nav").setAttribute("aria-expanded", "false");
+    }
+
+    function openPlanner(satName) {
+      activeTargetSatName = satName || selectedObject && selectedObject.name || "";
+      document.getElementById("plan-sat").textContent = activeTargetSatName || "Select an object first";
+      document.getElementById("modal-planner").classList.add("open");
+      if (activeTargetSatName) {
+        speakTacticalAlert(`Conjunction selected for ${activeTargetSatName}. Confirm an avoidance offset to simulate.`);
+      }
+    }
+
+    document.querySelectorAll(".nav-btn").forEach((btn) => {
+      btn.addEventListener("click", () => showSection(btn.dataset.section));
+    });
+    const appRoot = document.getElementById("app");
+    const navButton = document.getElementById("btn-nav");
+    function setNavOpen(open) {
+      appRoot.classList.toggle("nav-open", open);
+      navButton.setAttribute("aria-expanded", String(open));
+    }
+    navButton.onclick = () => setNavOpen(!appRoot.classList.contains("nav-open"));
+    document.getElementById("btn-close-nav").onclick = () => setNavOpen(false);
+    document.getElementById("nav-backdrop").onclick = () => setNavOpen(false);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { setNavOpen(false); appRoot.classList.remove("aside-open"); document.getElementById("modal-planner").classList.remove("open"); }
+    });
+    document.getElementById("btn-aside").onclick = () => document.getElementById("app").classList.toggle("aside-open");
+    new MutationObserver(() => {
+      document.getElementById("btn-aside").setAttribute("aria-expanded", String(appRoot.classList.contains("aside-open")));
+    }).observe(appRoot, { attributes: true, attributeFilter: ["class"] });
+    document.getElementById("btn-close-aside").onclick = () => document.getElementById("app").classList.remove("aside-open");
+    document.getElementById("btn-open-planner").onclick = () => openPlanner(activeTargetSatName || (selectedObject && selectedObject.name));
+    document.getElementById("btn-debris-scan").onclick = scanDebrisRadius;
+    document.getElementById("btn-close-planner").onclick = () => document.getElementById("modal-planner").classList.remove("open");
+    document.getElementById("btn-debrief").onclick = () => {
+      const n = lastPayload && lastPayload.active_satellites_count;
+      const c = conjunctionPairs.length;
+      const targetBrief = selectedObject
+        ? ` Selected object: ${selectedObject.name}. Type: ${selectedObject.type || "type unavailable"}.`
+        : " No object is currently selected.";
+      speakTacticalAlert(`Console operational. Tracking ${n != null ? n : "an unknown number of"} objects. Backend reports ${c} conjunction pair records.${targetBrief}`);
+    };
+
+    function paintRange(el) { el.style.setProperty("--pct", ((el.value - el.min) / (el.max - el.min) * 100) + "%"); }
+    const timeSliderEl = document.getElementById("timeSlider");
+    timeSliderEl.addEventListener("input", () => paintRange(timeSliderEl));
+    paintRange(timeSliderEl);
+    document.getElementById("timeSlider").addEventListener("input", scheduleUpdate);
+    document.getElementById("fluxSlider").addEventListener("input", () => {
+      userTouchedFlux = true;
+      fluxOverride = document.getElementById("fluxSlider").value;
+      document.getElementById("fluxVal").textContent = fluxOverride;
+      scheduleUpdate();
+    });
+    ["tog-orbits", "tog-debris", "tog-conj", "tog-atm"].forEach((id) => {
+      document.getElementById(id).addEventListener("change", () => {
+        atmosphereMesh.visible = document.getElementById("tog-atm").checked;
+        if (lastPayload) applyCatalog(lastPayload);
+        else drawConjunctionLines();
+      });
+    });
+
+    const dt = 0.02;
+    function animate() {
+      requestAnimationFrame(animate);
+      trackedObjects.forEach((obj) => {
+        obj.pos[0] += obj.vel[0] * dt;
+        obj.pos[1] += obj.vel[1] * dt;
+        obj.pos[2] += obj.vel[2] * dt;
+        obj.mesh.position.set(obj.pos[0] * SCALE, obj.pos[1] * SCALE, obj.pos[2] * SCALE);
+      });
+      if (selectedObject) {
+        document.getElementById("insp-speed").textContent = mag(selectedObject.vel).toFixed(3) + " km/s";
+        document.getElementById("insp-x").textContent = fmt(selectedObject.pos[0], 2) + " km";
+        document.getElementById("insp-y").textContent = fmt(selectedObject.pos[1], 2) + " km";
+        document.getElementById("insp-z").textContent = fmt(selectedObject.pos[2], 2) + " km";
+        const alt = altitudeKm(selectedObject.pos);
+        document.getElementById("insp-alt").textContent = fmt(alt, 1) + " km";
+      }
+      starUniforms.uTime.value = performance.now() / 1000;
+      if (!REDUCED_MOTION) starField.rotation.y += 0.00004;
+      earth.rotation.y += 0.00045;
+      atmosphereMesh.rotation.y += 0.00045;
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    async function sendManeuverToBackend(strategy) {
+      const satName = activeTargetSatName || (selectedObject && selectedObject.name);
+      if (!satName) return;
+      const targetObj = trackedObjects.find((o) => o.name === satName);
+      if (targetObj) {
+        const offsetDist = strategy === "A" ? 2500 : 5000;
+        targetObj.pos[0] += offsetDist;
+        targetObj.pos[1] += offsetDist * 0.5;
+        targetObj.maneuvered = true;
+      }
+      document.getElementById("modal-planner").classList.remove("open");
+      speakTacticalAlert(`Strategy ${strategy} simulation committed for ${satName}.`);
+      try {
+        const res = await fetch("/api/maneuver", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sat_name: satName, strategy })
+        });
+        const body = await res.json();
+        lastManeuver = {
+          sat_name: body.sat_name || satName,
+          strategy,
+          offset_applied: body.offset_applied,
+          status: body.status,
+          at: new Date().toISOString()
+        };
+        document.getElementById("maneuver-result").innerHTML =
+          `<div class="sim-banner"><b>Simulated result (not catalog ephemeris)</b>` +
+          `Status: ${esc(lastManeuver.status || "unavailable")}<br>Object: ${esc(lastManeuver.sat_name)}<br>` +
+          `Offset applied: ${lastManeuver.offset_applied != null ? esc(lastManeuver.offset_applied) + " km" : "unavailable"}</div>`;
+        showSection("maneuver");
+        updateSimulation();
+      } catch (err) {
+        console.error("Maneuver API error:", err);
+        document.getElementById("maneuver-result").textContent = "Maneuver request failed. Local preview may have shifted; backend offset was not confirmed.";
+      }
+    }
+
+    document.getElementById("btn-exec-a").onclick = (e) => { e.preventDefault(); e.stopPropagation(); sendManeuverToBackend("A"); };
+    document.getElementById("btn-exec-b").onclick = (e) => { e.preventDefault(); e.stopPropagation(); sendManeuverToBackend("B"); };
+
+    renderer.domElement.addEventListener("click", (event) => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObjects(objectsGroup.children);
+      if (intersects.length) {
+        selectedObject = intersects[0].object.userData;
+        fillInspector(selectedObject);
+        setPane("target");
+        document.getElementById("app").classList.add("aside-open");
+        speakTacticalAlert(`Target locked. Object name: ${selectedObject.name}. Object type: ${selectedObject.type || "type unavailable"}.`);
+        if (lastPayload) applyCatalog(lastPayload);
+      }
+    });
+
+    function resizeRenderer() {
+      const wrap = document.getElementById("canvas-wrap");
+      const w = Math.max(1, wrap.clientWidth || container.clientWidth || 1);
+      const h = Math.max(1, wrap.clientHeight || container.clientHeight || 1);
+      // Shift the view down by half the metric-row height so Earth is centred in the free space below the cards.
+      const metricsEl = document.getElementById("metrics");
+      const reserve = Math.min(metricsEl ? metricsEl.offsetHeight : 0, h * 0.35);
+      camera.aspect = w / h;
+      camera.setViewOffset(w, h, 0, -Math.round(reserve / 2), w, h);
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h, false);
+      starUniforms.uPx.value = renderer.getPixelRatio();
+      renderer.domElement.style.width = w + "px";
+      renderer.domElement.style.height = h + "px";
+    }
+    new ResizeObserver(resizeRenderer).observe(document.getElementById("canvas-wrap"));
+    new ResizeObserver(resizeRenderer).observe(document.getElementById("metrics"));
+    window.addEventListener("resize", resizeRenderer);
+    resizeRenderer();
+    requestAnimationFrame(resizeRenderer);
+    // Portrait screens: start further back so the whole Earth and its orbits fit the narrower view.
+    if (camera.aspect < 1.1) {
+      camera.position.multiplyScalar(Math.min(1.6, 1.1 / Math.max(camera.aspect, 0.55)));
+      controls.update();
+    }
+
+    updateSimulation();
+    animate();
+  </script>
+</body>
+</html>
